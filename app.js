@@ -1465,6 +1465,14 @@ document.querySelector('#player-form').addEventListener('submit', async (event) 
       premiumButtonText,
       updatedAt: serverTimestamp(),
     }, { merge: true });
+
+    // نفس رابط Google Play متاح أيضاً للتطبيق الرئيسي عبر settings/app.
+    // نحفظ الاسمين للتوافق مع الإصدارات الحالية والقديمة.
+    await setDoc(doc(db, 'settings', 'app'), {
+      storeUrl,
+      appStoreUrl: storeUrl,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
     message.classList.remove('error');
     message.textContent = 'تم حفظ إعدادات المشغل.';
   } catch (_) {
