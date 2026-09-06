@@ -213,3 +213,11 @@ textarea:focus { border-color: #38bdf8; }
 }
 
 .source-help{display:block;margin-top:6px;opacity:.75;font-size:.82rem;line-height:1.5}
+
+
+.source-headers { margin: 8px 0; border: 1px solid rgba(127,127,127,.2); border-radius: 10px; padding: 6px 10px; }
+.source-headers summary { cursor: pointer; font-weight: 600; }
+.source-header-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.source-header-grid label { display: block; margin-bottom: 4px; }
+.source-header-grid input { width: 100%; box-sizing: border-box; }
+@media (max-width: 700px) { .source-header-grid { grid-template-columns: 1fr; } }

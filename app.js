@@ -321,7 +321,8 @@ function renderChannelsForCurrentCategory() {
     const sourceType = channel.streamType === 'web' ? 'web' : 'hls';
     const sourcePlaceholder = sourceType === 'web' ? 'https://example.com/live' : 'https://example.com/live/playlist.m3u8';
     const protectionControl = sourceType === 'web' ? '' : `<label class="protect-toggle"><input type="checkbox" data-protected-toggle="${escapeHtml(channel.id)}" ${channel.protected === false ? '' : 'checked'}> حماية برابط مؤقت</label>`;
-    return `<article class="card channel-item">${checkbox}${logo}<div class="channel-info"><h3>${escapeHtml(channel.title || 'قناة بلا اسم')}</h3><p>${escapeHtml(channel.subtitle || 'بدون وصف')}</p>${orderControl}<div class="channel-source"><label>نوع المصدر <select class="source-type-select" data-source-type="${escapeHtml(channel.id)}"><option value="hls" ${sourceType === 'hls' ? 'selected' : ''}>بث مباشر HLS / m3u8</option><option value="web" ${sourceType === 'web' ? 'selected' : ''}>صفحة ويب</option></select></label>${protectionControl}<input type="url" class="source-input" data-source-input="${escapeHtml(channel.id)}" placeholder="${sourcePlaceholder}"><button type="button" data-save-source="${escapeHtml(channel.id)}">حفظ المصدر</button><span class="source-status" data-source-status="${escapeHtml(channel.id)}"></span>${sourceType === 'web' ? '<small class="source-help">سيحاول المشغل اكتشاف مصدر HLS/MP4 العام من الصفحة تلقائياً، وإذا تعذر التحقق منه يبقى داخل WebView.</small>' : ''}</div></div><div class="channel-actions"><button type="button" data-edit-channel="${escapeHtml(channel.id)}">تعديل</button><button class="delete-category-button" type="button" data-delete-channel="${escapeHtml(channel.id)}">حذف</button></div></article>`;
+    const sourceId = escapeHtml(channel.id);
+    return `<article class="card channel-item">${checkbox}${logo}<div class="channel-info"><h3>${escapeHtml(channel.title || 'قناة بلا اسم')}</h3><p>${escapeHtml(channel.subtitle || 'بدون وصف')}</p>${orderControl}<div class="channel-source"><label>نوع المصدر <select class="source-type-select" data-source-type="${sourceId}"><option value="hls" ${sourceType === 'hls' ? 'selected' : ''}>بث مباشر HLS / m3u8</option><option value="web" ${sourceType === 'web' ? 'selected' : ''}>صفحة ويب</option></select></label>${protectionControl}<input type="url" class="source-input" data-source-input="${sourceId}" placeholder="${sourcePlaceholder}"><details class="source-headers"><summary>⚙️ إعدادات الطلب (Referer / User-Agent)</summary><div class="source-header-grid"><div><label>Referer <span class="optional-label">اختياري</span></label><input type="url" data-source-referer="${sourceId}" placeholder="https://example.com/"></div><div><label>User-Agent <span class="optional-label">اختياري</span></label><input type="text" data-source-user-agent="${sourceId}" placeholder="Mozilla/5.0 ..."></div></div><small class="source-help">تُستخدم هذه القيم مع طلب المصدر. اتركها فارغة إذا لم يحتج الرابط إلى Headers خاصة.</small></details><button type="button" data-save-source="${sourceId}">حفظ المصدر</button><span class="source-status" data-source-status="${sourceId}"></span>${sourceType === 'web' ? '<small class="source-help">سيحاول المشغل اكتشاف مصدر HLS/MP4 العام من الصفحة تلقائياً، وإذا تعذر التحقق منه يبقى داخل WebView.</small>' : ''}</div></div><div class="channel-actions"><button type="button" data-edit-channel="${sourceId}">تعديل</button><button class="delete-category-button" type="button" data-delete-channel="${sourceId}">حذف</button></div></article>`;
   }).join('');
   channelsList.classList.remove('hidden');
   loadChannelSources(list);
@@ -479,6 +480,11 @@ async function loadChannelSources(channels) {
     const typeSelect = document.querySelector(`[data-source-type="${channel.id}"]`);
     const status = document.querySelector(`[data-source-status="${channel.id}"]`);
     if (!input) return;
+    const sourceHeaders = channel.sourceHeaders && typeof channel.sourceHeaders === 'object' ? channel.sourceHeaders : {};
+    const refererInput = document.querySelector(`[data-source-referer="${channel.id}"]`);
+    const userAgentInput = document.querySelector(`[data-source-user-agent="${channel.id}"]`);
+    if (refererInput) refererInput.value = sourceHeaders.referer || '';
+    if (userAgentInput) userAgentInput.value = sourceHeaders['user-agent'] || sourceHeaders.userAgent || '';
     const streamType = channel.streamType === 'web' ? 'web' : 'hls';
     if (typeSelect) typeSelect.value = streamType;
     if (streamType === 'web' && channel.sourceUrl) {
@@ -510,8 +516,15 @@ async function saveChannelSource(channelId) {
   const button = document.querySelector(`[data-save-source="${channelId}"]`);
   const protectedToggle = document.querySelector(`[data-protected-toggle="${channelId}"]`);
   const typeSelect = document.querySelector(`[data-source-type="${channelId}"]`);
+  const refererInput = document.querySelector(`[data-source-referer="${channelId}"]`);
+  const userAgentInput = document.querySelector(`[data-source-user-agent="${channelId}"]`);
   if (!input) return;
   const url = input.value.trim();
+  const referer = refererInput?.value.trim() || '';
+  const userAgent = userAgentInput?.value.trim() || '';
+  const sourceHeaders = {};
+  if (referer) sourceHeaders.referer = referer;
+  if (userAgent) sourceHeaders['user-agent'] = userAgent;
   const streamType = typeSelect?.value === 'web' ? 'web' : 'hls';
   if (!url) { if (status) { status.textContent = 'أدخل رابط المصدر أولاً'; status.classList.add('error'); } return; }
   if (!/^https?:\/\//i.test(url)) { if (status) { status.textContent = 'الرابط يجب أن يبدأ بـ http:// أو https://'; status.classList.add('error'); } return; }
@@ -519,21 +532,21 @@ async function saveChannelSource(channelId) {
   if (status) status.classList.remove('error');
   try {
     if (streamType === 'web') {
-      await updateDoc(doc(db, 'channels', channelId), { streamType: 'web', sourceUrl: url, protected: false, directUrl: null });
+      await updateDoc(doc(db, 'channels', channelId), { streamType: 'web', sourceUrl: url, protected: false, directUrl: null, sourceHeaders });
       if (status) status.textContent = 'تم الحفظ ✓ صفحة ويب';
     } else {
       const isProtected = protectedToggle ? protectedToggle.checked : true;
       if (isProtected) {
         await setDoc(doc(db, 'privateStreams', channelId), { url, updatedAt: serverTimestamp() }, { merge: true });
-        await updateDoc(doc(db, 'channels', channelId), { streamType: 'hls', sourceUrl: null, protected: true, directUrl: null });
+        await updateDoc(doc(db, 'channels', channelId), { streamType: 'hls', sourceUrl: null, protected: true, directUrl: null, sourceHeaders });
         if (status) status.textContent = 'تم الحفظ ✓ HLS محمي برابط مؤقت';
       } else {
-        await updateDoc(doc(db, 'channels', channelId), { streamType: 'hls', sourceUrl: null, protected: false, directUrl: url });
+        await updateDoc(doc(db, 'channels', channelId), { streamType: 'hls', sourceUrl: null, protected: false, directUrl: url, sourceHeaders });
         if (status) status.textContent = 'تم الحفظ ✓ HLS بدون حماية';
       }
     }
     const channel = currentChannels.find((item) => item.id === channelId);
-    if (channel) Object.assign(channel, streamType === 'web' ? { streamType: 'web', sourceUrl: url, protected: false, directUrl: null } : { streamType: 'hls' });
+    if (channel) Object.assign(channel, streamType === 'web' ? { streamType: 'web', sourceUrl: url, protected: false, directUrl: null, sourceHeaders } : { streamType: 'hls', sourceHeaders });
   } catch (_) {
     if (status) { status.textContent = 'تعذر الحفظ. تحقق من قواعد Firestore.'; status.classList.add('error'); }
   } finally {
@@ -1202,6 +1215,7 @@ bulkForm.addEventListener('submit', async (event) => {
           playerChannelKey: ch.playerChannelKey || null,
           streamType: ch.streamType === 'web' ? 'web' : 'hls',
           sourceUrl: ch.streamType === 'web' ? (ch.sourceUrl || ch.streamUrl || null) : null,
+          sourceHeaders: ch.sourceHeaders && typeof ch.sourceHeaders === 'object' ? ch.sourceHeaders : {},
           viewCount: 0,
           order: baseOrder + channelOrderCounter,
           createdAt: serverTimestamp(),
