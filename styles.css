@@ -221,3 +221,48 @@ textarea:focus { border-color: #38bdf8; }
 .source-header-grid label { display: block; margin-bottom: 4px; }
 .source-header-grid input { width: 100%; box-sizing: border-box; }
 @media (max-width: 700px) { .source-header-grid { grid-template-columns: 1fr; } }
+
+/* تصنيفات المحتوى الجديدة — امتداد بصري فقط للبنية الحالية */
+.content-type-manager { padding: 22px; margin: 18px 0; }
+.content-type-manager-head, .content-library-head { display:flex; align-items:center; justify-content:space-between; gap:18px; }
+.content-type-manager-head h3, .content-library-head h3 { margin:0 0 5px; font-size:1.1rem; }
+.content-type-cards { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin-top:18px; }
+.content-type-card { min-width:0; display:grid; grid-template-columns:auto 1fr auto; grid-template-rows:auto auto; align-items:center; column-gap:9px; text-align:right; padding:14px; color:#dceafa; background:#121e33; border:1px solid #2e415e; border-radius:15px; transition:transform .18s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease; }
+.content-type-card:hover,.content-type-card:focus-visible { transform:translateY(-2px); border-color:#4c6a8f; box-shadow:0 10px 24px rgba(0,0,0,.18); outline:none; }
+.content-type-card.active { background:#153553; border-color:#38bdf8; box-shadow:0 0 0 1px rgba(56,189,248,.16); }
+.content-type-icon { grid-row:1 / span 2; width:38px; height:38px; display:grid; place-items:center; background:#1b2b45; border-radius:11px; font-size:20px; }
+.content-type-name { font-weight:800; }
+.content-type-card strong { color:#7dd3fc; font-size:1.15rem; }
+.content-type-status { grid-column:2 / -1; color:#8497b4; font-size:.72rem; margin-top:3px; }
+.content-all-button { white-space:nowrap; }
+.content-library-panel { padding:22px; margin:18px 0 22px; }
+.content-library-list { display:grid; gap:9px; margin-top:16px; }
+.content-library-row { display:grid; grid-template-columns:54px minmax(0,1.7fr) minmax(80px,.7fr) minmax(70px,.6fr) auto; align-items:center; gap:12px; padding:10px 12px; border:1px solid #293b57; border-radius:13px; background:#101b2d; }
+.content-library-row:hover { border-color:#425c7f; }
+.content-library-poster { width:54px; height:70px; object-fit:cover; border-radius:8px; background:#18263d; }
+.content-library-title { min-width:0; }
+.content-library-title strong { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.content-library-title small,.content-library-meta { color:#8ea1bb; font-size:.78rem; }
+.content-type-pill { display:inline-flex; width:max-content; padding:4px 8px; border-radius:99px; background:#183657; color:#bfe8ff; font-size:.72rem; font-weight:700; }
+.content-library-actions { display:flex; gap:6px; justify-content:flex-start; }
+.content-library-actions button { padding:8px 10px; font-size:.78rem; }
+.content-library-empty { text-align:center; padding:28px 15px; color:#a9b9d1; }
+.content-empty-icon { font-size:32px; display:block; margin-bottom:8px; }
+.content-metadata-grid { grid-column:1 / -1; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.content-flags { grid-column:1 / -1; display:flex; gap:18px; align-items:center; }
+.content-flags .protect-toggle { margin:0; }
+.series-episode-fields { grid-column:1 / -1; display:grid; grid-template-columns:2fr 1fr 1fr; gap:12px; }
+@media (max-width: 900px) {
+  .content-type-cards { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .content-library-row { grid-template-columns:48px minmax(0,1fr) auto; }
+  .content-library-row > .content-library-meta, .content-library-row > .content-type-pill { display:none; }
+}
+@media (max-width: 640px) {
+  .page-shell { width:min(100% - 20px,1100px); padding:20px 0; }
+  .content-type-manager-head,.content-library-head { align-items:flex-start; flex-direction:column; }
+  .content-type-cards { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .content-type-card { padding:12px; }
+  .content-metadata-grid,.series-episode-fields { grid-template-columns:1fr; }
+  .content-flags { flex-wrap:wrap; }
+  .content-library-actions { grid-column:2; }
+}

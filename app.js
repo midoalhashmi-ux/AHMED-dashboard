@@ -110,6 +110,27 @@ const channelSubtitle = document.querySelector('#channel-subtitle');
 const channelStatus = document.querySelector('#channel-status');
 const channelLogo = document.querySelector('#channel-logo');
 const channelPlayerKey = document.querySelector('#channel-player-key');
+const contentTypeInput = document.querySelector('#content-type');
+const contentPosterInput = document.querySelector('#content-poster');
+const contentYearInput = document.querySelector('#content-year');
+const contentGenreInput = document.querySelector('#content-genre');
+const contentFeaturedInput = document.querySelector('#content-featured');
+const contentPremiumInput = document.querySelector('#content-premium');
+const contentSeriesIdInput = document.querySelector('#content-series-id');
+const contentSeasonInput = document.querySelector('#content-season');
+const contentEpisodeInput = document.querySelector('#content-episode');
+const contentTypeCards = document.querySelectorAll('[data-content-filter]');
+const contentFilterAll = document.querySelector('#content-filter-all');
+const contentLibraryTitle = document.querySelector('#content-library-title');
+const contentLibrarySummary = document.querySelector('#content-library-summary');
+const contentLibraryList = document.querySelector('#content-library-list');
+const contentLibraryEmpty = document.querySelector('#content-library-empty');
+const contentAddButton = document.querySelector('#content-add-button');
+const contentAddTypeButton = document.querySelector('#content-add-type-button');
+const contentCounts = document.querySelectorAll('[data-content-count]');
+const featuredContentCount = document.querySelector('#featured-content-count');
+const resultsContentCount = document.querySelector('#results-content-count');
+const contentLibraryPanel = document.querySelector('#content-library-panel');
 const channelEditId = document.querySelector('#channel-edit-id');
 const channelFormTitle = document.querySelector('#channel-form-title');
 const channelSaveButton = document.querySelector('#channel-save-button');
@@ -153,6 +174,9 @@ const bulkCloseButton = document.querySelector('#bulk-close-button');
 let currentChannels = [];
 let currentCategories = [];
 let currentParentId = null;
+let contentFilter = 'all';
+let editingContentCategoryId = null;
+let contentFormMode = false;
 
 // ---- المباريات (API-Football عبر Cloud Function) ----
 const syncMatchesButton = document.querySelector('#sync-matches-button');
@@ -253,6 +277,7 @@ function openCategoryForm(existingId) {
 
 function openChannelForm(existingId) {
   if (currentParentId === null) return;
+  contentFormMode = false;
   closeAllFormCards();
   const parent = currentCategories.find((item) => item.id === currentParentId);
   channelCategory.value = currentParentId;
@@ -267,12 +292,24 @@ function openChannelForm(existingId) {
     channelStatus.value = channel.status || 'upcoming';
     channelLogo.value = channel.logoUrl || '';
     channelPlayerKey.value = channel.playerChannelKey || '';
+    contentTypeInput.value = normalizedContentType(channel);
+    contentPosterInput.value = channel.posterUrl || '';
+    contentYearInput.value = channel.releaseYear || '';
+    contentGenreInput.value = channel.genre || '';
+    contentFeaturedInput.checked = channel.isFeatured === true;
+    contentPremiumInput.checked = channel.isPremium === true;
+    contentSeriesIdInput.value = channel.seriesId || '';
+    contentSeasonInput.value = channel.seasonNumber ?? '';
+    contentEpisodeInput.value = channel.episodeNumber ?? '';
+    editingContentCategoryId = currentParentId;
     channelFormTitle.textContent = `تعديل: ${channel.title || ''}`;
     channelSaveButton.textContent = 'حفظ التعديل';
   } else {
     channelForm.reset();
     channelEditId.value = '';
     channelCategory.value = currentParentId;
+    contentTypeInput.value = 'channel';
+    editingContentCategoryId = currentParentId;
     channelFormTitle.textContent = `إضافة قناة داخل «${parent?.title || ''}»`;
     channelSaveButton.textContent = 'إضافة القناة';
   }
@@ -440,6 +477,128 @@ async function swapChannelOrder(channelId, newPosition) {
   }
 }
 
+
+function contentTypeLabel(type) {
+  return ({ channel: 'قناة', movie: 'فيلم', series: 'مسلسل', anime: 'أنمي', result: 'نتيجة' })[type] || 'قناة';
+}
+
+function normalizedContentType(item) {
+  const value = typeof item.contentType === 'string' ? item.contentType : '';
+  return ['movie', 'series', 'anime', 'result'].includes(value) ? value : 'channel';
+}
+
+function renderContentLibrary() {
+  if (!contentLibraryList) return;
+  const media = currentChannels.slice();
+  const counts = { channel: 0, movie: 0, series: 0, anime: 0 };
+  media.forEach((item) => { counts[normalizedContentType(item)] += 1; });
+  contentCounts.forEach((node) => { node.textContent = String(counts[node.dataset.contentCount] || 0); });
+  const featured = media.filter((item) => item.isFeatured === true).length;
+  if (featuredContentCount) featuredContentCount.textContent = String(featured);
+
+  const filtered = contentFilter === 'featured'
+    ? media.filter((item) => item.isFeatured === true)
+    : contentFilter === 'all'
+      ? media
+      : media.filter((item) => normalizedContentType(item) === contentFilter);
+
+  const title = contentFilter === 'all' ? 'كل المحتوى'
+    : contentFilter === 'featured' ? 'المحتوى المميز'
+    : contentTypeLabel(contentFilter);
+  contentLibraryTitle.textContent = title;
+  contentLibrarySummary.textContent = `${filtered.length} عنصر`;
+
+  if (!filtered.length) {
+    contentLibraryList.innerHTML = '';
+    contentLibraryEmpty.classList.remove('hidden');
+    return;
+  }
+  contentLibraryEmpty.classList.add('hidden');
+  contentLibraryList.innerHTML = filtered
+    .slice()
+    .sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0))
+    .map((item) => {
+      const type = normalizedContentType(item);
+      const poster = item.posterUrl
+        ? `<img class="content-library-poster" src="${escapeHtml(item.posterUrl)}" alt="" onerror="this.style.visibility='hidden'">`
+        : `<div class="content-library-poster" aria-hidden="true">🎬</div>`;
+      const flags = [
+        item.isFeatured ? 'مميز' : '',
+        item.isPremium ? 'Premium' : '',
+      ].filter(Boolean).join(' · ');
+      const details = [item.releaseYear || '', item.genre || '', flags].filter(Boolean).join(' · ');
+      return `<article class="content-library-row">
+        ${poster}
+        <div class="content-library-title">
+          <strong>${escapeHtml(item.title || 'بدون اسم')}</strong>
+          <small>${escapeHtml(item.subtitle || details || 'بدون وصف')}</small>
+        </div>
+        <span class="content-type-pill">${contentTypeLabel(type)}</span>
+        <span class="content-library-meta">${escapeHtml(details || 'عام')}</span>
+        <div class="content-library-actions">
+          <button type="button" data-content-edit="${escapeHtml(item.id)}">تعديل</button>
+          <button type="button" class="delete-category-button" data-content-delete="${escapeHtml(item.id)}">حذف</button>
+        </div>
+      </article>`;
+    }).join('');
+}
+
+function setContentFilter(filter) {
+  contentFilter = filter;
+  contentTypeCards.forEach((card) => card.classList.toggle('active', card.dataset.contentFilter === filter));
+  if (contentFilterAll) contentFilterAll.classList.toggle('active', filter === 'all');
+  if (filter === 'result') {
+    // النتائج تُدار من لوحة المباريات نفسها، لذلك لا ننشئ سجلات نتائج وهمية داخل channels.
+    const navButton = document.querySelector('.sub-nav [data-panel="matches-panel"]');
+    if (navButton) navButton.click();
+    return;
+  }
+  renderContentLibrary();
+}
+
+function openContentForm(type = 'movie', existingId = '') {
+  contentFormMode = true;
+  closeAllFormCards();
+  channelFormMessage.textContent = '';
+  channelFormMessage.classList.remove('error');
+  editingContentCategoryId = null;
+
+  if (existingId) {
+    const item = currentChannels.find((entry) => entry.id === existingId);
+    if (!item) return;
+    editingContentCategoryId = item.categoryId || null;
+    channelEditId.value = item.id;
+    channelTitle.value = item.title || '';
+    channelSubtitle.value = item.subtitle || '';
+    channelStatus.value = item.status || 'upcoming';
+    channelLogo.value = item.logoUrl || '';
+    channelPlayerKey.value = item.playerChannelKey || '';
+    contentTypeInput.value = normalizedContentType(item);
+    contentPosterInput.value = item.posterUrl || '';
+    contentYearInput.value = item.releaseYear || '';
+    contentGenreInput.value = item.genre || '';
+    contentFeaturedInput.checked = item.isFeatured === true;
+    contentPremiumInput.checked = item.isPremium === true;
+    contentSeriesIdInput.value = item.seriesId || '';
+    contentSeasonInput.value = item.seasonNumber ?? '';
+    contentEpisodeInput.value = item.episodeNumber ?? '';
+    channelFormTitle.textContent = `تعديل ${contentTypeLabel(normalizedContentType(item))}: ${item.title || ''}`;
+    channelSaveButton.textContent = 'حفظ التعديل';
+  } else {
+    channelForm.reset();
+    channelEditId.value = '';
+    contentTypeInput.value = ['movie', 'series', 'anime'].includes(type) ? type : 'movie';
+    channelStatus.value = 'upcoming';
+    contentFeaturedInput.checked = false;
+    contentPremiumInput.checked = false;
+    channelFormTitle.textContent = `إضافة ${contentTypeLabel(contentTypeInput.value)}`;
+    channelSaveButton.textContent = `إضافة ${contentTypeLabel(contentTypeInput.value)}`;
+  }
+  updateContentFormVisibility();
+  channelFormCard.classList.remove('hidden');
+  channelFormCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 async function loadCategories() {
   resetCategories();
   const categoriesQuery = query(collection(db, 'categories'), orderBy('order'));
@@ -474,6 +633,7 @@ async function loadChannels() {
     ]);
     currentChannels = snapshot.docs.map((document) => ({ id: document.id, ...document.data() }));
     renderChannelsForCurrentCategory();
+    renderContentLibrary();
   } catch (_) {
     currentChannels = [];
     if (currentParentId !== null) {
@@ -637,10 +797,12 @@ async function loadMatchesStatus() {
     const snapshot = await getDoc(doc(db, 'matches_daily', todayDateKey()));
     const data = snapshot.data();
     if (!data) {
+      if (resultsContentCount) resultsContentCount.textContent = '0';
       matchesStatusText.textContent = 'لا توجد مزامنة اليوم بعد. اضغط «مزامنة الآن».';
       return;
     }
     const count = Array.isArray(data.events) ? data.events.length : 0;
+    if (resultsContentCount) resultsContentCount.textContent = String(count);
     matchesStatusText.textContent = `آخر تحديث: ${formatTimestamp(data.updatedAt)} · ${count} مباراة اليوم`;
     renderMatchesDebug(data);
   } catch (_) {
@@ -948,6 +1110,60 @@ subNavButtons.forEach((button) => button.addEventListener('click', () => {
   nav.querySelectorAll('.nav-button').forEach((item) => item.classList.toggle('active', item === button));
   showPanel(button.dataset.panel);
 }));
+
+
+contentTypeCards.forEach((card) => {
+  card.addEventListener('click', () => setContentFilter(card.dataset.contentFilter || 'all'));
+});
+contentFilterAll?.addEventListener('click', () => setContentFilter('all'));
+
+contentAddButton?.addEventListener('click', () => {
+  const type = ['movie', 'series', 'anime'].includes(contentFilter) ? contentFilter : 'movie';
+  openContentForm(type);
+});
+
+contentAddTypeButton?.addEventListener('click', () => {
+  const type = ['movie', 'series', 'anime'].includes(contentFilter) ? contentFilter : 'movie';
+  openContentForm(type);
+});
+
+contentLibraryList?.addEventListener('click', async (event) => {
+  const edit = event.target.closest('[data-content-edit]');
+  const remove = event.target.closest('[data-content-delete]');
+  if (edit) {
+    openContentForm('movie', edit.dataset.contentEdit);
+    return;
+  }
+  if (remove) {
+    const item = currentChannels.find((entry) => entry.id === remove.dataset.contentDelete);
+    if (!item || !window.confirm(`حذف «${item.title || ''}» نهائياً؟`)) return;
+    try {
+      await deleteDoc(doc(db, 'channels', remove.dataset.contentDelete));
+      await loadChannels();
+    } catch (_) {
+      window.alert('تعذر حذف المحتوى. تحقق من قواعد Firestore.');
+    }
+  }
+});
+
+function updateContentFormVisibility() {
+  const type = contentTypeInput?.value || 'channel';
+  const isChannel = type === 'channel';
+  contentSeriesIdInput?.closest('.series-episode-fields')?.classList.toggle('hidden', isChannel);
+  const isMedia = ['movie', 'series', 'anime'].includes(type);
+  contentPosterInput?.closest('.content-metadata-grid')?.classList.toggle('hidden', false);
+  if (contentFormMode && !channelEditId.value) {
+    channelFormTitle.textContent = `إضافة ${contentTypeLabel(type)}`;
+    channelSaveButton.textContent = `إضافة ${contentTypeLabel(type)}`;
+  }
+  // حقول المصدر/المشغل تبقى كما هي للقنوات القديمة، بينما المحتوى المرئي
+  // لا يحتاج رابط بث في المرحلة الأولى.
+  document.querySelectorAll('.channel-form .channel-source').forEach((node) => {
+    node.classList.toggle('hidden', isMedia);
+  });
+}
+
+contentTypeInput?.addEventListener('change', updateContentFormVisibility);
 
 categoriesList.addEventListener('change', (event) => {
   const input = event.target.closest('[data-reorder-category]');
@@ -1349,21 +1565,63 @@ categoryForm.addEventListener('submit', async (event) => {
 });
 
 function resetChannelForm() {
-  channelForm.reset(); channelEditId.value = ''; channelFormTitle.textContent = 'إضافة قناة';
+  channelForm.reset(); channelEditId.value = ''; contentFormMode = false; editingContentCategoryId = null;
+  contentTypeInput.value = 'channel';
+  channelFormTitle.textContent = 'إضافة قناة';
   channelSaveButton.textContent = 'إضافة القناة'; channelFormMessage.textContent = '';
+  updateContentFormVisibility();
 }
 
 channelForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!currentParentId || !channelTitle.value.trim()) return;
-  const data = { categoryId: currentParentId, title: channelTitle.value.trim(), subtitle: channelSubtitle.value.trim(), status: channelStatus.value, logoUrl: channelLogo.value.trim() || null, playerChannelKey: channelPlayerKey.value.trim() || null, updatedAt: serverTimestamp() };
+  const type = contentTypeInput.value || 'channel';
+  const isMedia = ['movie', 'series', 'anime'].includes(type);
+  const categoryId = contentFormMode ? editingContentCategoryId : currentParentId;
+  if ((!categoryId && !isMedia) || !channelTitle.value.trim()) return;
+
+  const parsedYear = parseInt(contentYearInput.value, 10);
+  const parsedSeason = parseInt(contentSeasonInput.value, 10);
+  const parsedEpisode = parseInt(contentEpisodeInput.value, 10);
+  const data = {
+    categoryId: categoryId || null,
+    title: channelTitle.value.trim(),
+    subtitle: channelSubtitle.value.trim(),
+    status: channelStatus.value,
+    logoUrl: channelLogo.value.trim() || null,
+    playerChannelKey: channelPlayerKey.value.trim() || null,
+    contentType: type,
+    posterUrl: contentPosterInput.value.trim() || null,
+    releaseYear: Number.isFinite(parsedYear) ? parsedYear : null,
+    genre: contentGenreInput.value.trim() || null,
+    isFeatured: contentFeaturedInput.checked,
+    isPremium: contentPremiumInput.checked,
+    seriesId: contentSeriesIdInput.value.trim() || null,
+    seasonNumber: Number.isFinite(parsedSeason) ? parsedSeason : null,
+    episodeNumber: Number.isFinite(parsedEpisode) ? parsedEpisode : null,
+    updatedAt: serverTimestamp(),
+  };
   channelSaveButton.disabled = true;
   try {
-    if (channelEditId.value) await updateDoc(doc(db, 'channels', channelEditId.value), data);
-    else await addDoc(collection(db, 'channels'), { ...data, viewCount: 0, order: Date.now(), createdAt: serverTimestamp() });
-    resetChannelForm(); closeAllFormCards(); await loadChannels();
-  } catch (_) { channelFormMessage.textContent = 'تعذر حفظ القناة. تحقق من قواعد Firestore.'; channelFormMessage.classList.add('error'); }
-  finally { channelSaveButton.disabled = false; }
+    if (channelEditId.value) {
+      await updateDoc(doc(db, 'channels', channelEditId.value), data);
+    } else {
+      await addDoc(collection(db, 'channels'), {
+        ...data,
+        viewCount: 0,
+        order: Date.now(),
+        createdAt: serverTimestamp(),
+      });
+    }
+    resetChannelForm();
+    closeAllFormCards();
+    contentFormMode = false;
+    await loadChannels();
+  } catch (_) {
+    channelFormMessage.textContent = 'تعذر حفظ المحتوى. تحقق من قواعد Firestore.';
+    channelFormMessage.classList.add('error');
+  } finally {
+    channelSaveButton.disabled = false;
+  }
 });
 channelCloseButton.addEventListener('click', () => { resetChannelForm(); closeAllFormCards(); });
 channelsList.addEventListener('change', (event) => {

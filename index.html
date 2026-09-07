@@ -80,6 +80,63 @@
           </div>
         </section>
 
+        <section class="content-type-manager card" aria-label="تصنيفات المحتوى">
+          <div class="content-type-manager-head">
+            <div>
+              <p class="eyebrow">تصنيفات المحتوى</p>
+              <h3>إدارة المحتوى حسب النوع</h3>
+              <p class="muted">اختر نوعاً لتصفية المحتوى. السجلات القديمة التي لا تحتوي contentType تُحسب تلقائياً ضمن القنوات.</p>
+            </div>
+            <button id="content-filter-all" class="secondary-button content-all-button" type="button">الكل</button>
+          </div>
+          <div id="content-type-cards" class="content-type-cards">
+            <button class="content-type-card active" type="button" data-content-filter="all">
+              <span class="content-type-icon">📺</span><span class="content-type-name">قنوات</span>
+              <strong data-content-count="channel">0</strong><span class="content-type-status">المحتوى الحالي</span>
+            </button>
+            <button class="content-type-card" type="button" data-content-filter="movie">
+              <span class="content-type-icon">🎬</span><span class="content-type-name">أفلام</span>
+              <strong data-content-count="movie">0</strong><span class="content-type-status">جاهز للإضافة</span>
+            </button>
+            <button class="content-type-card" type="button" data-content-filter="series">
+              <span class="content-type-icon">📺</span><span class="content-type-name">مسلسلات</span>
+              <strong data-content-count="series">0</strong><span class="content-type-status">جاهز للإضافة</span>
+            </button>
+            <button class="content-type-card" type="button" data-content-filter="anime">
+              <span class="content-type-icon">🎞️</span><span class="content-type-name">أنمي</span>
+              <strong data-content-count="anime">0</strong><span class="content-type-status">جاهز للإضافة</span>
+            </button>
+            <button class="content-type-card" type="button" data-content-filter="result">
+              <span class="content-type-icon">🏆</span><span class="content-type-name">نتائج</span>
+              <strong id="results-content-count">0</strong><span class="content-type-status">مباريات اليوم</span>
+            </button>
+            <button class="content-type-card" type="button" data-content-filter="featured">
+              <span class="content-type-icon">⭐</span><span class="content-type-name">محتوى مميز</span>
+              <strong id="featured-content-count">0</strong><span class="content-type-status">مميز</span>
+            </button>
+          </div>
+        </section>
+
+        <section id="content-library-panel" class="card content-library-panel">
+          <div class="content-library-head">
+            <div>
+              <p class="eyebrow">مكتبة المحتوى</p>
+              <h3 id="content-library-title">كل المحتوى</h3>
+              <p id="content-library-summary" class="muted">0 عنصر</p>
+            </div>
+            <div class="section-actions">
+              <button id="content-add-button" type="button">+ إضافة محتوى</button>
+              <button id="content-add-type-button" class="secondary-button" type="button">+ إضافة النوع المحدد</button>
+            </div>
+          </div>
+          <div id="content-library-empty" class="content-library-empty hidden">
+            <span class="content-empty-icon">📦</span>
+            <h3>لا يوجد محتوى في هذا التصنيف</h3>
+            <p>استخدم زر الإضافة لإنشاء أول عنصر.</p>
+          </div>
+          <div id="content-library-list" class="content-library-list" aria-live="polite"></div>
+        </section>
+
         <div id="categories-bulk-bar" class="bulk-bar hidden">
           <label class="select-all-control"><input id="categories-select-all" type="checkbox"> تحديد الكل</label>
           <span id="categories-selected-count">0 محدد</span>
@@ -121,6 +178,29 @@
             <div><label for="channel-status">الحالة</label><select id="channel-status"><option value="live">مباشر الآن</option><option value="upcoming">قريباً</option><option value="ended">انتهى</option><option value="disabled">معطّلة</option></select></div>
             <div><label for="channel-logo">رابط الشعار <span class="optional-label">اختياري</span></label><input id="channel-logo" type="url" placeholder="https://example.com/logo.png" /></div>
             <div><label for="channel-player-key">مفتاح القناة في المشغل <span class="optional-label">اختياري حالياً</span></label><input id="channel-player-key" maxlength="80" placeholder="مثال: ssc-1-hd" /></div>
+            <div class="content-metadata-grid">
+              <div>
+                <label for="content-type">نوع المحتوى</label>
+                <select id="content-type">
+                  <option value="channel">قناة</option>
+                  <option value="movie">فيلم</option>
+                  <option value="series">مسلسل</option>
+                  <option value="anime">أنمي</option>
+                </select>
+              </div>
+              <div><label for="content-poster">صورة الغلاف <span class="optional-label">اختياري</span></label><input id="content-poster" type="url" placeholder="https://example.com/poster.jpg" /></div>
+              <div><label for="content-year">سنة الإنتاج <span class="optional-label">اختياري</span></label><input id="content-year" type="number" min="1900" max="2100" placeholder="2026" /></div>
+              <div><label for="content-genre">التصنيف <span class="optional-label">اختياري</span></label><input id="content-genre" maxlength="60" placeholder="أكشن، دراما…" /></div>
+            </div>
+            <div class="content-flags">
+              <label class="protect-toggle"><input id="content-featured" type="checkbox"> محتوى مميز</label>
+              <label class="protect-toggle"><input id="content-premium" type="checkbox"> Premium</label>
+            </div>
+            <div class="series-episode-fields">
+              <div><label for="content-series-id">معرّف المسلسل <span class="optional-label">اختياري</span></label><input id="content-series-id" maxlength="80" /></div>
+              <div><label for="content-season">الموسم <span class="optional-label">اختياري</span></label><input id="content-season" type="number" min="0" /></div>
+              <div><label for="content-episode">الحلقة <span class="optional-label">اختياري</span></label><input id="content-episode" type="number" min="0" /></div>
+            </div>
             <p id="channel-form-message" class="form-message" role="status"></p>
             <div class="form-card-actions">
               <button id="channel-save-button" type="submit">إضافة القناة</button>
