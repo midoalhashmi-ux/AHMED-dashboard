@@ -183,7 +183,7 @@
             <div><p class="eyebrow">قنوات هذا القسم</p><h3 id="channels-title">القنوات</h3></div>
             <div class="section-actions">
               <button id="channels-select-toggle" class="secondary-button" type="button">تحديد للحذف</button>
-              <span id="channels-count" class="count-badge">0 قناة</span>
+              <span id="channels-count" class="count-badge" aria-live="polite">0 قناة</span>
             </div>
           </section>
           <div id="channels-bulk-bar" class="bulk-bar hidden">
@@ -193,7 +193,7 @@
             <button id="channels-select-cancel" class="secondary-button" type="button">إلغاء التحديد</button>
           </div>
           <section id="channels-loading" class="card loading-card hidden"><span class="spinner"></span><p>جارٍ قراءة القنوات…</p></section>
-          <section id="channels-empty" class="card message-card hidden"><h2>لا توجد قنوات بعد</h2><p>أضف أول قناة من زر «+ إضافة» أعلاه.</p></section>
+          <section id="channels-empty" class="card message-card hidden" role="status"><h2>لا توجد قنوات بعد</h2><p>أضف أول قناة من زر «+ إضافة» أعلاه.</p></section>
           <section id="channels-list" class="channels-list hidden"></section>
         </section>
         </section>
@@ -217,7 +217,7 @@
               <button id="sync-window-button" type="button" class="secondary-button">إعادة مزامنة كل الأيام (-3 إلى +3)</button>
             </div>
           </section>
-          <p class="muted matches-sync-hint">"مزامنة الآن" يحدّث اليوم فقط. "إعادة مزامنة كل الأيام" يحدّث الأيام السبعة كاملة فورًا (يفيد بعد أول نشر أو لو لاحظت أمس/غدًا فارغين) — يستهلك حصة API-Football أكبر، استخدمه عند الحاجة فقط.</p>
+          <p class="muted matches-sync-hint">"مزامنة الآن" يحدّث اليوم فقط. "إعادة مزامنة كل الأيام" يحدّث الأيام السبعة كاملة فورًا (يفيد بعد أول نشر أو لو لاحظت أمس/غدًا فارغين) — يستهلك حصة API-Football أكبر، استخدمه عند الحاجة فقط. عند أول استخدام في جلسة المتصفح سيُطلب مفتاح Worker ولا يتم تضمينه داخل ملفات اللوحة.</p>
           <section id="matches-message" class="card message-card hidden" role="status"></section>
         </section>
 

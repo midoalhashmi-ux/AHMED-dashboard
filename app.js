@@ -26,8 +26,22 @@ import {
 // ولا حساب فوترة سعودي عبر CNTXT). استبدله بالعنوان الحقيقي بعد
 // "wrangler deploy" — راجع cloudflare-worker/README.md.
 const WORKER_BASE_URL = 'https://binsheikh-api.binsheikh.workers.dev';
-// نفس القيمة اللي ضبطتها بأمر: wrangler secret put ADMIN_SYNC_SECRET
-const ADMIN_SYNC_SECRET = 'Sh3ikh2026Sports!Admin#Sync99';
+// لا نضع ADMIN_SYNC_SECRET داخل JavaScript المنشور. يُدخل مشغّل لوحة التحكم
+// المفتاح مرة واحدة لكل جلسة متصفح، ويبقى في sessionStorage ولا يدخل المستودع.
+const SYNC_SECRET_STORAGE_KEY = 'binsheikh-admin-sync-secret';
+let adminSyncSecret = '';
+try {
+  adminSyncSecret = sessionStorage.getItem(SYNC_SECRET_STORAGE_KEY) || '';
+} catch (_) {}
+
+function getAdminSyncSecret() {
+  if (adminSyncSecret) return adminSyncSecret;
+  const value = window.prompt('أدخل مفتاح مزامنة المباريات الخاص بالـ Worker:');
+  if (!value?.trim()) throw new Error('لم يتم إدخال مفتاح المزامنة.');
+  adminSyncSecret = value.trim();
+  try { sessionStorage.setItem(SYNC_SECRET_STORAGE_KEY, adminSyncSecret); } catch (_) {}
+  return adminSyncSecret;
+}
 
 // إعدادات تطبيق الويب من مشروع Firebase نفسه. لا تضع هنا كلمات مرور المستخدمين.
 const firebaseConfig = {
@@ -642,12 +656,17 @@ async function runMatchesSync(button, body, { busyText, idleText, successMessage
   matchesMessage.classList.add('hidden');
   matchesMessage.classList.remove('error-card');
   try {
+    const syncSecret = getAdminSyncSecret();
     const response = await fetch(`${WORKER_BASE_URL}/refreshMatches`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-key': ADMIN_SYNC_SECRET },
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': syncSecret },
       body: JSON.stringify(body),
     });
     const result = await response.json();
+    if (response.status === 401 || response.status === 403) {
+      adminSyncSecret = '';
+      try { sessionStorage.removeItem(SYNC_SECRET_STORAGE_KEY); } catch (_) {}
+    }
     if (!response.ok || result.ok === false) {
       throw new Error(result.message || `HTTP ${response.status}`);
     }
@@ -897,6 +916,12 @@ loginForm.addEventListener('submit', async (event) => {
 
 document.querySelector('#logout-button').addEventListener('click', () => signOut(auth));
 retryCategories.addEventListener('click', loadCategories);
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  addMenu.classList.add('hidden');
+  addMenuToggle.setAttribute('aria-expanded', 'false');
+  closeAllFormCards();
+});
 function showPanel(panelId) {
   document.querySelectorAll('.admin-panel').forEach((panel) => panel.classList.toggle('hidden', panel.id !== panelId));
 }
