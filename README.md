@@ -46,7 +46,7 @@
 - **`channels`** — قنوات، كل قناة تنتمي لقسم واحد عبر `categoryId` (ياخذ قيمة أي قسم بأي مستوى تعشيش — مو بس الأقسام الرئيسية). الحقول: `title`, `subtitle`, `status` (live/upcoming/ended), `logoUrl`, `playerChannelKey`, `protected`, `directUrl`, `viewCount`, `createdAt/updatedAt`.
 - **`privateStreams/{channelId}`** — رابط m3u8 الحقيقي للقنوات المحمية فقط (`protected: true`). **لا يقرأها تطبيق المحتوى إطلاقاً** — فقط اللوحة (بعد تسجيل الدخول) ولاحقاً Cloud Function توقّع روابط مؤقتة منها. القنوات غير المحمية (`protected: false`) يُخزَّن الرابط مباشرة وعلناً في `channels.directUrl` (بدون تأخير عند التشغيل).
 - **`settings/theme`** — `primaryColor`, `backgroundColor` (ألوان التطبيق الحيّة).
-- **`settings/player`** — `deepLinkScheme`, `storeUrl` (لتطبيق المشغّل المنفصل `sports_player`).
+- **`settings/player`** — `deepLinkScheme`, `storeUrl` (لتطبيق المشغّل المنفصل `sports_player`) و`showSourcePage` الاختياري للتحكم في ظهور صفحة المصدر داخل WebView. إذا غاب الحقل يبقى السلوك القديم (إظهار الصفحة).
 - **`settings/ads`** — `enabled` (مفتاح تشغيل/إيقاف الإعلانات بالكامل)، وأكواد كل شبكة إعلانات في كائن فرعي خاص بها: `admob` (`appId`, `bannerId`, `interstitialId`, `rewardedId`)، `applovin` (`sdkKey`, `bannerId`, `interstitialId`, `rewardedId`)، `unity` (`gameId`, `bannerId`, `interstitialId`, `rewardedId`).
 - **`contactMessages`** — رسائل "تواصل معنا"/"الإبلاغ عن رابط معطوب" من تطبيق
   المحتوى. الحقول: `type` (`general`/`broken_link`), `message`, `channelInfo`

@@ -578,6 +578,7 @@ async function loadPlayerSettings() {
     document.querySelector('#player-store-url').value = data.storeUrl || '';
     document.querySelector('#player-min-version').value = data.minVersion || '';
     document.querySelector('#player-update-url').value = data.updateUrl || '';
+    document.querySelector('#player-show-source-page').checked = data.showSourcePage !== false;
     document.querySelector('#premium-enabled').checked = data.premiumEnabled === true;
     document.querySelector('#premium-url').value = data.premiumUrl || '';
     document.querySelector('#premium-button-text').value = data.premiumButtonText || '';
@@ -1035,7 +1036,7 @@ categoriesBulkDelete.addEventListener('click', async () => {
   ].filter(Boolean).join(' و');
 
   if (!window.confirm(`سيتم حذف ${details} نهائياً مع جميع العناصر التابعة. هل تريد المتابعة؟`)) return;
-  if (!requestDeletePassword('أدخل كلمة المرور لتأكيد الحذف الجماعي للأقسام وجميع العناصر التابعة:')) return;
+  if (!requestDeleteConfirmation('أدخل كلمة المرور لتأكيد الحذف الجماعي للأقسام وجميع العناصر التابعة:')) return;
 
   categoriesBulkDelete.disabled = true;
   try {
@@ -1066,8 +1067,6 @@ function editCategory(id) {
   openCategoryForm(id);
 }
 
-const CATEGORY_DELETE_PASSWORD = '5115';
-
 function getCategoryDeleteTree(rootId) {
   const ids = new Set([rootId]);
   let changed = true;
@@ -1083,14 +1082,8 @@ function getCategoryDeleteTree(rootId) {
   return [...ids];
 }
 
-function requestDeletePassword(message) {
-  const password = window.prompt(message);
-  if (password === null) return false;
-  if (password !== CATEGORY_DELETE_PASSWORD) {
-    window.alert('كلمة المرور غير صحيحة. لم يتم حذف أي شيء.');
-    return false;
-  }
-  return true;
+function requestDeleteConfirmation(message) {
+  return window.confirm(message.replace('أدخل كلمة المرور لتأكيد', 'هل أنت متأكد من'));
 }
 
 async function deleteCategoryTree(rootId) {
@@ -1129,7 +1122,7 @@ async function deleteCategory(id) {
     ? `سيتم حذف «${category.title || ''}» وجميع ما بداخله${details ? ` (${details})` : ''} نهائياً. هل تريد المتابعة؟`
     : `حذف «${category.title || ''}» نهائياً؟`;
   if (!window.confirm(warning)) return;
-  if (!requestDeletePassword('أدخل كلمة المرور لتأكيد حذف القسم وجميع العناصر التابعة له:')) return;
+  if (!requestDeleteConfirmation('أدخل كلمة المرور لتأكيد حذف القسم وجميع العناصر التابعة له:')) return;
 
   try {
     const result = await deleteCategoryTree(id);
@@ -1475,6 +1468,7 @@ document.querySelector('#player-form').addEventListener('submit', async (event) 
   const storeUrl = document.querySelector('#player-store-url').value.trim();
   const minVersion = document.querySelector('#player-min-version').value.trim();
   const updateUrl = document.querySelector('#player-update-url').value.trim();
+  const showSourcePage = document.querySelector('#player-show-source-page').checked;
   const premiumEnabled = document.querySelector('#premium-enabled').checked;
   const premiumUrl = document.querySelector('#premium-url').value.trim();
   const premiumButtonText = document.querySelector('#premium-button-text').value.trim();
@@ -1485,6 +1479,7 @@ document.querySelector('#player-form').addEventListener('submit', async (event) 
       storeUrl,
       minVersion,
       updateUrl,
+      showSourcePage,
       premiumEnabled,
       premiumUrl,
       premiumButtonText,

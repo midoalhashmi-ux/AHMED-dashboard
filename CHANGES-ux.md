@@ -7,9 +7,10 @@ The dashboard already has the correct source split for the player:
 - Web sources retain `sourceHeaders`;
 - the worker remains responsible for temporary playback URLs.
 
-No dashboard data model or source-routing behavior was changed in this
+No channel data model or source-routing behavior was changed in this
 follow-up, because those changes could invalidate the player handoff that is
-already working.
+already working. The only new setting is the optional `showSourcePage` flag
+under `settings/player`.
 
 Small usability improvements were added: the channel count and empty state
 announce changes to assistive technology, and Escape closes the add menu and
@@ -25,3 +26,9 @@ browser session storage. The Worker still validates the same `x-admin-key`
 header, so no Worker deployment change is required. A future server-side
 Firebase admin-claim flow would remove the need for this one-time session
 prompt entirely.
+
+## Player source-page visibility
+
+The player settings form now persists the optional `showSourcePage` boolean
+under `settings/player`. It defaults to enabled when the field is absent, so
+existing installations keep their current behaviour.
