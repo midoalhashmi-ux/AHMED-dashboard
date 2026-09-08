@@ -110,10 +110,8 @@ const channelFormCard = document.querySelector('#channel-form-card');
 const channelForm = document.querySelector('#channel-form');
 const channelCategory = document.querySelector('#channel-category');
 const channelTitle = document.querySelector('#channel-title');
-const channelSubtitle = document.querySelector('#channel-subtitle');
-const channelStatus = document.querySelector('#channel-status');
 const channelLogo = document.querySelector('#channel-logo');
-const channelPlayerKey = document.querySelector('#channel-player-key');
+const channelSourceUrl = document.querySelector('#channel-source-url');
 const channelEditId = document.querySelector('#channel-edit-id');
 const channelFormTitle = document.querySelector('#channel-form-title');
 const channelSaveButton = document.querySelector('#channel-save-button');
@@ -257,30 +255,42 @@ function openCategoryForm(existingId) {
   categoryFormCard.classList.remove('hidden');
 }
 
-function openChannelForm(existingId) {
+function contentEntryLabel(contentType) {
+  return ({ channels: 'قناة', movies: 'فيلم', series: 'مسلسل', anime: 'أنمي' }[contentType] || 'محتوى');
+}
+
+async function openChannelForm(existingId) {
   if (currentParentId === null) return;
   closeAllFormCards();
   const parent = currentCategories.find((item) => item.id === currentParentId);
+  const contentType = parent?.contentType || activeContentType;
+  const label = contentEntryLabel(contentType);
   channelCategory.value = currentParentId;
   channelFormMessage.textContent = '';
   channelFormMessage.classList.remove('error');
+  channelSourceUrl.value = '';
   if (existingId) {
     const channel = currentChannels.find((item) => item.id === existingId);
     if (!channel) return;
     channelEditId.value = channel.id;
     channelTitle.value = channel.title || '';
-    channelSubtitle.value = channel.subtitle || '';
-    channelStatus.value = channel.status || 'upcoming';
     channelLogo.value = channel.logoUrl || '';
-    channelPlayerKey.value = channel.playerChannelKey || '';
-    channelFormTitle.textContent = `تعديل: ${channel.title || ''}`;
+    if (channel.streamType === 'hls' && channel.protected !== false) {
+      try {
+        const snapshot = await getDoc(doc(db, 'privateStreams', channel.id));
+        channelSourceUrl.value = snapshot.data()?.url || '';
+      } catch (_) { channelSourceUrl.value = ''; }
+    } else {
+      channelSourceUrl.value = channel.directUrl || channel.sourceUrl || '';
+    }
+    channelFormTitle.textContent = `تعديل: ${channel.title || label}`;
     channelSaveButton.textContent = 'حفظ التعديل';
   } else {
     channelForm.reset();
     channelEditId.value = '';
     channelCategory.value = currentParentId;
-    channelFormTitle.textContent = `إضافة قناة داخل «${parent?.title || ''}»`;
-    channelSaveButton.textContent = 'إضافة القناة';
+    channelFormTitle.textContent = `إضافة ${label} داخل «${parent?.title || ''}»`;
+    channelSaveButton.textContent = 'إضافة';
   }
   channelFormCard.classList.remove('hidden');
 }
@@ -1421,20 +1431,38 @@ categoryForm.addEventListener('submit', async (event) => {
 });
 
 function resetChannelForm() {
-  channelForm.reset(); channelEditId.value = ''; channelFormTitle.textContent = 'إضافة قناة';
-  channelSaveButton.textContent = 'إضافة القناة'; channelFormMessage.textContent = '';
+  channelForm.reset(); channelEditId.value = ''; channelFormTitle.textContent = 'إضافة محتوى';
+  channelSaveButton.textContent = 'إضافة'; channelFormMessage.textContent = '';
 }
 
 channelForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!currentParentId || !channelTitle.value.trim()) return;
-  const data = { categoryId: currentParentId, title: channelTitle.value.trim(), subtitle: channelSubtitle.value.trim(), status: channelStatus.value, logoUrl: channelLogo.value.trim() || null, playerChannelKey: channelPlayerKey.value.trim() || null, updatedAt: serverTimestamp() };
+  const sourceUrl = channelSourceUrl.value.trim();
+  const data = { categoryId: currentParentId, title: channelTitle.value.trim(), logoUrl: channelLogo.value.trim() || null, updatedAt: serverTimestamp() };
   channelSaveButton.disabled = true;
   try {
-    if (channelEditId.value) await updateDoc(doc(db, 'channels', channelEditId.value), data);
-    else await addDoc(collection(db, 'channels'), { ...data, viewCount: 0, order: Date.now(), createdAt: serverTimestamp() });
+    let channelId = channelEditId.value;
+    if (channelId) {
+      await updateDoc(doc(db, 'channels', channelId), data);
+    } else {
+      const created = await addDoc(collection(db, 'channels'), { ...data, viewCount: 0, order: Date.now(), createdAt: serverTimestamp(), streamType: 'hls', protected: true, directUrl: null, sourceUrl: null, sourceHeaders: {}, apiHeaders: {} });
+      channelId = created.id;
+    }
+
+    // المصدر الوحيد في نموذج الإضافة يُحفظ مع الحفاظ على نظام الحماية الحالي.
+    if (sourceUrl) {
+      const existing = currentChannels.find((item) => item.id === channelId);
+      const streamType = ['web', 'api', 'hls'].includes(existing?.streamType) ? existing.streamType : 'hls';
+      if (streamType === 'web' || streamType === 'api') {
+        await updateDoc(doc(db, 'channels', channelId), { streamType, sourceUrl, protected: false, directUrl: null });
+      } else {
+        await setDoc(doc(db, 'privateStreams', channelId), { url: sourceUrl, updatedAt: serverTimestamp() }, { merge: true });
+        await updateDoc(doc(db, 'channels', channelId), { streamType: 'hls', sourceUrl: null, protected: true, directUrl: null });
+      }
+    }
     resetChannelForm(); closeAllFormCards(); await loadChannels();
-  } catch (_) { channelFormMessage.textContent = 'تعذر حفظ القناة. تحقق من قواعد Firestore.'; channelFormMessage.classList.add('error'); }
+  } catch (_) { channelFormMessage.textContent = 'تعذر حفظ المحتوى. تحقق من قواعد Firestore.'; channelFormMessage.classList.add('error'); }
   finally { channelSaveButton.disabled = false; }
 });
 channelCloseButton.addEventListener('click', () => { resetChannelForm(); closeAllFormCards(); });

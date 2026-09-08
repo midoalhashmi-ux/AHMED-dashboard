@@ -119,20 +119,21 @@
           </form>
         </section>
 
-        <section id="channel-form-card" class="card category-form-card channel-form-card hidden">
-          <div><h2 id="channel-form-title">إضافة قناة</h2><p class="muted">بيانات العرض فقط؛ رابط البث من بطاقة القناة نفسها بعد الإنشاء.</p></div>
+        <section id="channel-form-card" class="card channel-form-card hidden">
+          <div class="channel-form-head">
+            <h2 id="channel-form-title">إضافة محتوى</h2>
+            <span class="muted">الاسم + الشعار + المصدر ثم حفظ مباشرة</span>
+          </div>
           <form id="channel-form" class="channel-form">
             <input id="channel-edit-id" type="hidden" />
             <input id="channel-category" type="hidden" />
-            <div><label for="channel-title">اسم القناة</label><input id="channel-title" required maxlength="50" placeholder="مثال: SSC 1" /></div>
-            <div><label for="channel-subtitle">وصف مختصر</label><input id="channel-subtitle" maxlength="90" placeholder="مثال: مباريات مباشرة" /></div>
-            <div><label for="channel-status">الحالة</label><select id="channel-status"><option value="live">مباشر الآن</option><option value="upcoming">قريباً</option><option value="ended">انتهى</option><option value="disabled">معطّلة</option></select></div>
-            <div><label for="channel-logo">رابط الشعار <span class="optional-label">اختياري</span></label><input id="channel-logo" type="url" placeholder="https://example.com/logo.png" /></div>
-            <div><label for="channel-player-key">مفتاح القناة في المشغل <span class="optional-label">اختياري حالياً</span></label><input id="channel-player-key" maxlength="80" placeholder="مثال: ssc-1-hd" /></div>
+            <div><label for="channel-title">الاسم</label><input id="channel-title" required maxlength="100" placeholder="اسم القناة أو الفيلم أو المسلسل أو الأنمي" /></div>
+            <div><label for="channel-logo">الشعار</label><input id="channel-logo" type="url" placeholder="رابط الشعار" /></div>
+            <div><label for="channel-source-url">المصدر</label><input id="channel-source-url" type="url" placeholder="رابط المصدر" /></div>
             <p id="channel-form-message" class="form-message" role="status"></p>
             <div class="form-card-actions">
-              <button id="channel-save-button" type="submit">إضافة القناة</button>
-              <button id="channel-close-button" class="secondary-button" type="button">إغلاق</button>
+              <button id="channel-save-button" type="submit">حفظ</button>
+              <button id="channel-close-button" class="secondary-button" type="button">إلغاء</button>
             </div>
           </form>
         </section>

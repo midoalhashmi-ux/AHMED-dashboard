@@ -229,3 +229,47 @@ textarea:focus { border-color: #38bdf8; }
 .content-type-tab:hover{background:rgba(255,255,255,.05);border-color:rgba(91,211,255,.25)}
 .content-type-tab.active{background:linear-gradient(135deg,rgba(45,188,235,.18),rgba(92,113,255,.16));border-color:rgba(91,211,255,.5);box-shadow:0 8px 24px rgba(0,0,0,.16);color:#fff}
 @media(max-width:650px){.content-type-tabs{gap:7px}.content-type-tab{flex-basis:calc(50% - 7px);font-size:.9rem}}
+/* SIMPLE CONTENT ADD/EDIT — الاسم + الشعار + المصدر فقط */
+.channel-form-card {
+  display: block;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+.channel-form-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.channel-form-head h2 { margin: 0; }
+.channel-form-head .muted { margin: 0; font-size: .86rem; }
+.channel-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 10px;
+  margin: 0;
+}
+.channel-form label { margin: 0 0 6px; }
+.channel-form input { padding: 10px 12px; }
+.channel-form .form-message { grid-column: 1 / -1; }
+.channel-form .form-card-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+  margin-top: 0;
+}
+.channel-form .form-card-actions button {
+  width: auto;
+  min-width: 150px;
+  margin-top: 0;
+}
+@media (max-width: 850px) {
+  .channel-form-head { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .channel-form { grid-template-columns: 1fr; }
+  .channel-form .form-message, .channel-form .form-card-actions { grid-column: 1; }
+  .channel-form .form-card-actions { flex-direction: column; }
+  .channel-form .form-card-actions button { width: 100%; }
+}
+
