@@ -1,80 +1,326 @@
+
 const WORKER_BASE_URL = 'https://binsheikh-api.binsheikh.workers.dev';
 const SYNC_SECRET_STORAGE_KEY = 'binsheikh-admin-sync-secret';
 const STATE_KEY = 'ristoAnimeAutoImportStateV1';
 const SOURCE_URL = 'https://ristoanime.me/series/';
 const BATCH_SIZE = 450;
-const FIREBASE_CONFIG = {
-  apiKey: 'AIzaSyAhbhgXXfR7A9AGsDk0c8GCp0bvvhyzw2g',
-  authDomain: 'sports-stream-app-36a7a.firebaseapp.com',
-  projectId: 'sports-stream-app-36a7a',
-  storageBucket: 'sports-stream-app-36a7a.firebasestorage.app',
-  messagingSenderId: '207449859236',
-  appId: '1:207449859236:web:b371a927db431000ceb231',
-  measurementId: 'G-YX8E8NCN8F',
-};
+const PAGE_LIMIT = 1000;
+const SERIES_LIMIT = 10000;
 
 let firebaseReady = false;
 let auth = null;
 let db = null;
+
 let running = false;
 let stopRequested = false;
 let currentState = loadState();
 
-function freshState() { return { version: 1, pageUrl: SOURCE_URL, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0, startedAt: null, lastError: '', completed: false }; }
-function loadState() { try { return JSON.parse(localStorage.getItem(STATE_KEY) || 'null') || freshState(); } catch (_) { return freshState(); } }
+function loadState() {
+  try { return JSON.parse(localStorage.getItem(STATE_KEY) || 'null') || freshState(); }
+  catch (_) { return freshState(); }
+}
+function freshState() {
+  return { version: 1, pageUrl: SOURCE_URL, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0, startedAt: null, lastError: '', completed: false };
+}
 function saveState() { localStorage.setItem(STATE_KEY, JSON.stringify(currentState)); }
 function secret() { try { return sessionStorage.getItem(SYNC_SECRET_STORAGE_KEY) || ''; } catch (_) { return ''; } }
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-async function ensureFirebase() {
-  if (firebaseReady) return;
-  const [{ getApps, getApp, initializeApp }, { getFirestore, doc, writeBatch }, { getAuth }] = await Promise.all([
-    import('https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js'),
-    import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js'),
-    import('https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js')
-  ]);
-  const app = getApps().length ? getApp() : initializeApp(FIREBASE_CONFIG);
-  db = getFirestore(app); auth = getAuth(app);
-  window.__ristoFirebase = { doc, writeBatch };
-  firebaseReady = true;
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+function hashId(input) {
+  // deterministic, URL-safe Firestore IDs; no crypto dependency needed in the browser.
+  let h1 = 0x811c9dc5, h2 = 0x9e3779b9;
+  for (let i = 0; i < input.length; i += 1) {
+    const c = input.charCodeAt(i);
+    h1 ^= c; h1 = Math.imul(h1, 0x01000193);
+    h2 ^= c + i; h2 = Math.imul(h2, 0x85ebca6b);
+  }
+  return `risto_${(h1 >>> 0).toString(16).padStart(8, '0')}${(h2 >>> 0).toString(16).padStart(8, '0')}`;
 }
-function hashId(input) { let h = 2166136261; for (let i=0;i<input.length;i++) { h ^= input.charCodeAt(i); h = Math.imul(h, 16777619); } return `risto_${(h>>>0).toString(16)}_${input.length.toString(36)}`; }
-function bilingualTitle(title) {
-  const t = String(title || '').replace(/\s+/g,' ').trim();
-  if (/\p{Script=Arabic}/u.test(t) && /[A-Za-z]/.test(t)) return t;
-  return t;
+
+function normalizeUrl(url) {
+  try { return new URL(url, 'https://ristoanime.me').href; } catch (_) { return ''; }
 }
-function episodeTitle(seriesTitle, number, fallback) { const n = number == null ? null : Number(number); return bilingualTitle(`${seriesTitle || fallback || 'أنمي'}${n == null ? '' : ` - الحلقة ${n}`}`); }
-function numberOf(ep) { const n = Number(ep?.episodeNumber); return Number.isFinite(n) ? n : null; }
-async function worker(action, payload={}) {
-  const response = await fetch(`${WORKER_BASE_URL}/ristoAnime/import`, { method:'POST', headers:{'Content-Type':'application/json','x-admin-key':secret()}, body:JSON.stringify({action,...payload}) });
-  const data = await response.json().catch(()=>({}));
-  if (!response.ok) throw new Error(data.message || `Worker HTTP ${response.status}`);
+function normalizeWatchUrl(url) {
+  const absolute = normalizeUrl(url);
+  if (!absolute || !absolute.startsWith('https://ristoanime.me/')) return '';
+  return absolute.includes('/watch/') ? absolute : '';
+}
+function bilingualTitle(value) {
+  const title = String(value || '').replace(/\s+/g, ' ').trim();
+  return title || 'أنمي بلا اسم';
+}
+function episodeNumber(value) {
+  const m = String(value || '').match(/(?:الحلقة|episode|ep|رقم)\s*[-#:]?\s*(\d+(?:\.\d+)?)/i);
+  return m ? Number(m[1]) : null;
+}
+
+async function worker(path, body) {
+  const key = secret();
+  if (!key) throw new Error('مفتاح مزامنة Worker غير موجود في جلسة لوحة التحكم.');
+  const response = await fetch(`${WORKER_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-key': key },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || data.error || `Worker HTTP ${response.status}`);
   return data;
 }
-async function commitRows(rows) {
-  const { doc, writeBatch } = window.__ristoFirebase; for (let i=0;i<rows.length;i+=BATCH_SIZE) { const batch=writeBatch(db); for (const row of rows.slice(i,i+BATCH_SIZE)) batch.set(doc(db,row.path),row.data,{merge:true}); await batch.commit(); await sleep(20); }
+
+async function commitOperations(ops) {
+  for (let i = 0; i < ops.length; i += BATCH_SIZE) {
+    if (stopRequested) throw new Error('__STOP__');
+    const batch = writeBatch(db);
+    ops.slice(i, i + BATCH_SIZE).forEach(op => op(batch));
+    await batch.commit();
+    updateProgress(`تم حفظ دفعة ${Math.min(i + BATCH_SIZE, ops.length)} / ${ops.length}`);
+    await sleep(20);
+  }
 }
-function ui() {
-  let box=document.getElementById('risto-importer-card'); if(box) return box;
-  box=document.createElement('section'); box.id='risto-importer-card'; box.className='card category-form-card hidden'; box.innerHTML=`<div><h2>🤖 استيراد RistoAnime تلقائياً</h2><p class="muted">يقرأ الموقع عبر Worker ويحفظ الأنمي والمواسم والحلقات تلقائياً على دفعات.</p></div><div class="form-actions"><button id="risto-start" type="button">بدء / استئناف الاستيراد</button><button id="risto-stop" class="secondary-button" type="button">إيقاف بعد الدفعة الحالية</button><button id="risto-reset" class="secondary-button" type="button">مسح التقدم</button></div><p id="risto-progress" class="form-message" role="status"></p>`;
-  document.querySelector('#home-panel')?.prepend(box); return box;
+
+function categoryOp(id, title, parentId, order, thumbnail) {
+  return batch => batch.set(doc(db, 'categories', id), {
+    title: bilingualTitle(title),
+    iconUrl: thumbnail || null,
+    parentId: parentId || null,
+    order: Number.isFinite(order) ? order : 0,
+    isPremium: false,
+    contentType: 'anime',
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
 }
-function progress(text){ const el=document.getElementById('risto-progress'); if(el) el.textContent=text; }
-async function importSeries(item) {
-  let url=item.url, page=0, episodes=[], title=item.title, thumb=item.thumbnail;
-  do { const data=await worker('series',{url,fallbackTitle:title,fallbackThumbnail:thumb}); title=bilingualTitle(data.title||title); thumb=data.thumbnail||thumb; episodes.push(...(data.episodes||[])); const pages=data.nextPageUrl; url=pages||null; page++; if(page>200) break; } while(url && !stopRequested);
-  const direct=episodes.slice();
-  const unresolved=[];
-  let data=await worker('series',{url:item.url,fallbackTitle:title,fallbackThumbnail:thumb});
-  for(const ep of data.episodePages||[]) if(!direct.some(x=>x.watchUrl===ep.episodeUrl)) unresolved.push(ep.episodeUrl);
-  for(let i=0;i<unresolved.length;i+=40){ if(stopRequested) break; const r=await worker('resolveEpisodes',{url:item.url,urls:unresolved.slice(i,i+40),fallbackThumbnail:thumb}); direct.push(...(r.episodes||[])); }
-  const unique=[...new Map(direct.filter(x=>x.watchUrl).map(x=>[x.watchUrl,x])).values()].sort((a,b)=>(numberOf(a)??999999)-(numberOf(b)??999999));
-  const categoryId=hashId(`anime|${item.url}`); const rows=[{path:`categories/${categoryId}`,data:{title,iconUrl:thumb||null,parentId:'',order:currentState.doneSeries,contentType:'anime',updatedAt:new Date()}}];
-  for(const ep of unique){ const n=numberOf(ep); const id=hashId(`${categoryId}|${ep.watchUrl}`); rows.push({path:`channels/${id}`,data:{categoryId,title:episodeTitle(title,n,ep.title),logoUrl:ep.thumbnail||thumb||null,streamType:'web',sourceUrl:ep.watchUrl,directUrl:null,protected:false,sourceHeaders:{},apiHeaders:{},order:n==null?999999:n,updatedAt:new Date()}}); }
-  await commitRows(rows); currentState.importedCategories++; currentState.importedEpisodes+=unique.length; currentState.doneSeries++; saveState(); return unique.length;
+function episodeOp(id, categoryId, title, sourceUrl, order, thumbnail) {
+  return batch => batch.set(doc(db, 'channels', id), {
+    categoryId,
+    title: bilingualTitle(title),
+    logoUrl: thumbnail || null,
+    streamType: 'web',
+    sourceUrl,
+    directUrl: null,
+    protected: false,
+    sourceHeaders: {},
+    apiHeaders: {},
+    order: Number.isFinite(order) ? order : 0,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
 }
-async function run(){ if(running)return; running=true; stopRequested=false; currentState.lastError=''; currentState.completed=false; currentState.startedAt=currentState.startedAt||new Date().toISOString(); saveState(); try { await ensureFirebase(); let pageUrl=currentState.pageUrl||SOURCE_URL; let pageGuard=0; while(pageUrl&&!stopRequested){ const data=await worker('catalog',{url:pageUrl}); const list=data.series||[]; for(let i=currentState.seriesIndex;i<list.length;i++){ if(stopRequested)break; currentState.seriesIndex=i; saveState(); progress(`جارٍ الاستيراد: ${currentState.doneSeries} أنمي • ${currentState.importedEpisodes} حلقة`); await importSeries(list[i]); currentState.seriesIndex=i+1; saveState(); } if(stopRequested) break; pageUrl=data.nextPageUrl||null; currentState.pageUrl=pageUrl; currentState.seriesIndex=0; saveState(); pageGuard++; if(pageGuard>1000)break; } currentState.completed=!stopRequested; saveState(); progress(currentState.completed?`اكتمل الاستيراد: ${currentState.doneSeries} أنمي • ${currentState.importedEpisodes} حلقة`:`تم الإيقاف. يمكنك الاستئناف لاحقاً.`); } catch(e){ currentState.lastError=e?.message||String(e); saveState(); progress(`توقف بسبب خطأ: ${currentState.lastError}`); } finally { running=false; } }
-function bind(){ const box=ui(); document.getElementById('risto-start').onclick=run; document.getElementById('risto-stop').onclick=()=>{stopRequested=true;progress('سيتم الإيقاف بعد إنهاء العملية الحالية…');}; document.getElementById('risto-reset').onclick=()=>{if(running)return;currentState=freshState();saveState();progress('تم مسح التقدم.');}; progress(currentState.completed?`آخر استيراد مكتمل: ${currentState.doneSeries} أنمي • ${currentState.importedEpisodes} حلقة`:'جاهز للاستيراد التلقائي.'); }
-function addMenuItem(){ const menu=document.getElementById('add-menu'); if(!menu||menu.querySelector('[data-add-type="risto-auto"]'))return; const b=document.createElement('button'); b.type='button'; b.dataset.addType='risto-auto'; b.setAttribute('role','menuitem'); b.textContent='🤖 استيراد RistoAnime تلقائياً'; b.onclick=()=>{menu.classList.add('hidden');const box=ui();box.classList.remove('hidden');box.scrollIntoView({behavior:'smooth',block:'start'});}; menu.appendChild(b); }
-function boot(){ const timer=setInterval(()=>{ if(document.getElementById('add-menu')&&document.getElementById('home-panel')){clearInterval(timer);bind();addMenuItem();}},300); }
-boot();
+
+function createUI() {
+  const addMenu = document.querySelector('#add-menu');
+  if (!addMenu || document.querySelector('#risto-auto-import-item')) return;
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.id = 'risto-auto-import-item';
+  item.setAttribute('role', 'menuitem');
+  item.dataset.addType = 'risto-auto';
+  item.textContent = '🤖 استيراد RistoAnime تلقائياً';
+  addMenu.insertBefore(item, addMenu.firstChild);
+  item.addEventListener('click', () => openImporter());
+
+  const card = document.createElement('section');
+  card.id = 'risto-import-card';
+  card.className = 'card category-form-card hidden';
+  card.innerHTML = `
+    <div>
+      <h2>🤖 استيراد RistoAnime تلقائياً</h2>
+      <p class="muted">يقرأ الأقسام والحلقات من RistoAnime عبر Worker، ويحفظها في دفعات آمنة بدون تغيير المشغل أو مصادر HLS/API الحالية.</p>
+    </div>
+    <div class="category-form" style="gap:12px">
+      <label>نطاق الاستيراد
+        <select id="risto-import-scope"><option value="all">كل الأنميات</option></select>
+      </label>
+      <div id="risto-import-progress" class="form-message" role="status">جاهز.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" id="risto-start">بدء / استئناف</button>
+        <button type="button" id="risto-stop" class="secondary-button">إيقاف آمن</button>
+        <button type="button" id="risto-reset" class="secondary-button">إعادة ضبط المهمة</button>
+      </div>
+      <p class="muted" style="margin:0">الإيقاف لا يحذف أي بيانات؛ يمكن استئناف المهمة لاحقاً، والمعرّفات ثابتة لمنع التكرار.</p>
+    </div>`;
+  const anchor = document.querySelector('#bulk-form-card') || document.querySelector('#category-form-card');
+  anchor?.parentElement?.insertBefore(card, anchor);
+  card.querySelector('#risto-start').addEventListener('click', () => runImport());
+  card.querySelector('#risto-stop').addEventListener('click', () => { stopRequested = true; updateProgress('سيتم الإيقاف بعد اكتمال الدفعة الحالية…'); });
+  card.querySelector('#risto-reset').addEventListener('click', () => {
+    if (running) return;
+    currentState = freshState(); saveState(); updateProgress('تمت إعادة ضبط المهمة.');
+  });
+  updateProgress(currentState.completed ? 'اكتملت آخر مهمة.' : 'جاهز للاستيراد أو الاستئناف.');
+}
+
+function updateProgress(text) {
+  const el = document.querySelector('#risto-import-progress');
+  if (el) el.textContent = text;
+}
+function openImporter() {
+  const card = document.querySelector('#risto-import-card');
+  if (!card) return;
+  document.querySelectorAll('.card').forEach(el => { if (el.id !== 'risto-import-card') el.classList.add('hidden'); });
+  card.classList.remove('hidden');
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function discoverCatalog() {
+  const series = [];
+  const seenPages = new Set();
+  let pageUrl = currentState.pageUrl || SOURCE_URL;
+  while (pageUrl && !seenPages.has(pageUrl) && seenPages.size < PAGE_LIMIT) {
+    if (stopRequested) throw new Error('__STOP__');
+    seenPages.add(pageUrl);
+    updateProgress(`جاري قراءة قائمة الأنميات… صفحة ${seenPages.size}`);
+    const data = await worker('/ristoAnime/import', { action: 'catalog', url: pageUrl });
+    for (const item of (data.series || [])) {
+      const url = normalizeUrl(item.url);
+      if (!url || !url.includes('ristoanime.me')) continue;
+      if (!series.some(x => x.url === url)) series.push({ ...item, url });
+    }
+    pageUrl = data.nextPageUrl ? normalizeUrl(data.nextPageUrl) : '';
+  }
+  if (!series.length) throw new Error('لم يتم العثور على أنميات في قائمة RistoAnime.');
+  currentState.pages = series;
+  currentState.pageUrl = '';
+  saveState();
+  return series;
+}
+
+async function collectSeriesData(item) {
+  const pages = [];
+  const seasons = [];
+  const seen = new Set();
+  let pageUrl = item.url;
+  let first = true;
+  while (pageUrl && !seen.has(pageUrl) && seen.size < PAGE_LIMIT) {
+    seen.add(pageUrl);
+    const data = await worker('/ristoAnime/import', { action: 'series', url: pageUrl, fallbackTitle: item.title, fallbackThumbnail: item.thumbnail });
+    if (first) {
+      pages.push(data);
+      first = false;
+    } else {
+      pages.push({ ...data, title: '', thumbnail: null, seasons: [] });
+    }
+    for (const season of (data.seasons || [])) {
+      if (!seasons.some(s => s.url === season.url)) seasons.push(season);
+    }
+    pageUrl = data.nextPageUrl ? normalizeUrl(data.nextPageUrl) : '';
+  }
+  return { pages, seasons };
+}
+
+async function resolveEpisodePages(episodes, thumbnail) {
+  const unresolved = episodes.filter(ep => !normalizeWatchUrl(ep.watchUrl || ep.url) && ep.url).map(ep => ep.url);
+  const resolved = new Map();
+  for (let i = 0; i < unresolved.length; i += 40) {
+    if (stopRequested) throw new Error('__STOP__');
+    const chunk = unresolved.slice(i, i + 40);
+    const data = await worker('/ristoAnime/import', { action: 'resolveEpisodes', urls: chunk, fallbackThumbnail: thumbnail });
+    for (const ep of (data.episodes || [])) if (ep.originalUrl) resolved.set(ep.originalUrl, ep);
+  }
+  return episodes.map(ep => {
+    const direct = normalizeWatchUrl(ep.watchUrl || ep.url);
+    if (direct) return { ...ep, watchUrl: direct };
+    return resolved.get(ep.url) || null;
+  }).filter(Boolean);
+}
+
+async function importOneSeries(item, index) {
+  updateProgress(`(${index + 1}/${currentState.pages.length}) ${item.title || 'أنمي'} — قراءة المواسم والحلقات…`);
+  const collected = await collectSeriesData(item);
+  const first = collected.pages[0] || {};
+  const dataTitle = first.title || item.title || 'أنمي بلا اسم';
+  const thumbnail = item.thumbnail || first.thumbnail || null;
+  const showKey = item.url;
+  const showId = hashId(`category|${showKey}`);
+  const ops = [categoryOp(showId, dataTitle, null, index + 1, thumbnail)];
+  let categoryCount = 1;
+  let episodeCount = 0;
+
+  // Build season buckets from real season pages. If there are no season links,
+  // the show itself is the episode container.
+  const seasonEntries = collected.seasons.length
+    ? collected.seasons
+    : [{ title: '', url: item.url, episodes: collected.pages.flatMap(p => p.episodes || []) }];
+
+  for (let si = 0; si < seasonEntries.length; si += 1) {
+    const season = seasonEntries[si];
+    let seasonEpisodes = Array.isArray(season.episodes) ? season.episodes : [];
+    if (season.url && season.url !== item.url) {
+      const seasonData = await collectSeriesData({ ...item, url: season.url, title: season.title, thumbnail });
+      seasonEpisodes = seasonData.pages.flatMap(p => p.episodes || []);
+    } else if (!seasonEpisodes.length) {
+      seasonEpisodes = collected.pages.flatMap(p => p.episodes || []);
+    }
+    seasonEpisodes = await resolveEpisodePages(seasonEpisodes, thumbnail);
+    const hasSeasonName = collected.seasons.length > 0 || season.title;
+    const seasonId = hasSeasonName ? hashId(`category|${showKey}|season|${season.url || season.title || si}`) : showId;
+    if (hasSeasonName) {
+      ops.push(categoryOp(seasonId, season.title || `الموسم ${si + 1}`, showId, si + 1, thumbnail));
+      categoryCount += 1;
+    }
+    for (const ep of seasonEpisodes) {
+      const watchUrl = normalizeWatchUrl(ep.watchUrl || ep.url);
+      if (!watchUrl) continue;
+      const n = episodeNumber(ep.title) ?? Number(ep.episodeNumber);
+      const title = ep.title || `${dataTitle} - الحلقة ${Number.isFinite(n) ? n : episodeCount + 1}`;
+      const id = hashId(`episode|${seasonId}|${watchUrl}`);
+      ops.push(episodeOp(id, seasonId, title, watchUrl, Number.isFinite(n) ? n : episodeCount + 1, ep.thumbnail || thumbnail));
+      episodeCount += 1;
+    }
+  }
+  if (!episodeCount) return { categoryCount, episodeCount: 0 };
+  await commitOperations(ops);
+  return { categoryCount, episodeCount };
+}
+
+async function runImport() {
+  if (running) return;
+  if (!firebaseReady || !auth || !db) { updateProgress('تعذر الاتصال بخدمة لوحة التحكم. أعد تحميل الصفحة وحاول مرة أخرى.'); return; }
+  if (!auth.currentUser) { updateProgress('سجّل الدخول إلى لوحة التحكم أولاً.'); return; }
+  if (!secret()) { updateProgress('مفتاح Worker غير موجود في الجلسة. استخدم نفس مفتاح مزامنة اللوحة ثم أعد المحاولة.'); return; }
+  running = true; stopRequested = false;
+  currentState.startedAt ||= new Date().toISOString();
+  currentState.lastError = '';
+  saveState();
+  try {
+    if (!currentState.pages.length || currentState.completed) {
+      currentState = freshState();
+      currentState.startedAt = new Date().toISOString();
+      const series = await discoverCatalog();
+      currentState.pages = series;
+      currentState.seriesIndex = 0;
+      currentState.doneSeries = 0;
+      currentState.importedEpisodes = 0;
+      currentState.importedCategories = 0;
+      saveState();
+    }
+    while (currentState.seriesIndex < currentState.pages.length) {
+      if (stopRequested) throw new Error('__STOP__');
+      const result = await importOneSeries(currentState.pages[currentState.seriesIndex], currentState.seriesIndex);
+      currentState.importedCategories += result.categoryCount;
+      currentState.importedEpisodes += result.episodeCount;
+      currentState.doneSeries += 1;
+      currentState.seriesIndex += 1;
+      saveState();
+      updateProgress(`تم ${currentState.doneSeries}/${currentState.pages.length} أنمي — ${currentState.importedEpisodes} حلقة.`);
+    }
+    currentState.completed = true; saveState();
+    updateProgress(`اكتمل الاستيراد: ${currentState.importedCategories} قسم و${currentState.importedEpisodes} حلقة. لا توجد بيانات مكررة بسبب المعرّفات الثابتة.`);
+    window.dispatchEvent(new CustomEvent('risto-import-complete'));
+  } catch (error) {
+    if (error?.message === '__STOP__') {
+      saveState(); updateProgress('تم الإيقاف بأمان. اضغط «بدء / استئناف» للمتابعة.');
+    } else {
+      currentState.lastError = String(error?.message || error); saveState();
+      updateProgress(`توقفت المهمة بسبب خطأ: ${currentState.lastError} — يمكنك الاستئناف بعد إصلاحه.`);
+    }
+  } finally { running = false; stopRequested = false; }
+}
+
+async function boot() {
+  for (let i = 0; i < 100 && !window.__AHMED_DASHBOARD_FIREBASE__; i += 1) await sleep(50);
+  const shared = window.__AHMED_DASHBOARD_FIREBASE__;
+  if (shared) { auth = shared.auth; db = shared.db; firebaseReady = true; }
+  createUI();
+  if (auth) auth.onAuthStateChanged(() => createUI());
+  // إبقاء لوحة التحكم الأصلية كما هي؛ الاستيراد لا يعمل تلقائياً عند فتح الصفحة حتى لا يبدأ آلاف العمليات دون قصد.
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true }); else boot();

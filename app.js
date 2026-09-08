@@ -100,6 +100,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+window.__AHMED_DASHBOARD_FIREBASE__ = { app, auth, db, firebaseConfig };
 const views = {
   loading: document.querySelector('#loading-view'),
   login: document.querySelector('#login-view'),
