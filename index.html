@@ -56,6 +56,13 @@
 
         <section id="home-panel" class="admin-panel" data-group="app">
 
+        <nav id="content-type-tabs" class="content-type-tabs" aria-label="نوع المحتوى">
+          <button class="content-type-tab active" type="button" data-content-type="channels">📺 القنوات</button>
+          <button class="content-type-tab" type="button" data-content-type="movies">🎬 الأفلام</button>
+          <button class="content-type-tab" type="button" data-content-type="series">📺 المسلسلات</button>
+          <button class="content-type-tab" type="button" data-content-type="anime">🍥 الأنمي</button>
+        </nav>
+
         <section class="section-heading">
           <div>
             <p class="eyebrow">إدارة المحتوى</p>
@@ -103,6 +110,7 @@
               <input id="category-image" name="image" type="url" placeholder="https://example.com/image.jpg" />
             </div>
             <input id="category-parent" name="parentId" type="hidden" value="" />
+            <input id="category-content-type" name="contentType" type="hidden" value="channels" />
             <p id="category-form-message" class="form-message" role="status"></p>
             <div class="form-card-actions">
               <button id="category-save-button" type="submit">إضافة القسم</button>

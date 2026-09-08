@@ -77,6 +77,8 @@ const categorySaveButton = document.querySelector('#category-save-button');
 const categoryCloseButton = document.querySelector('#category-close-button');
 const categoryFormMessage = document.querySelector('#category-form-message');
 const categoryParent = document.querySelector('#category-parent');
+const categoryContentType = document.querySelector('#category-content-type');
+const contentTypeTabs = document.querySelectorAll('#content-type-tabs [data-content-type]');
 const categoriesTitle = document.querySelector('#categories-title');
 const categoriesContext = document.querySelector('#categories-context');
 const categoryFormTitle = document.querySelector('#category-form-title');
@@ -94,6 +96,7 @@ const categoriesBulkDelete = document.querySelector('#categories-bulk-delete');
 const categoriesSelectCancel = document.querySelector('#categories-select-cancel');
 const categoriesSelectAll = document.querySelector('#categories-select-all');
 let categorySelectMode = false;
+let activeContentType = 'channels';
 const selectedCategoryIds = new Set();
 
 // ---- زر "+ إضافة" الموحّد وبطاقاته ----
@@ -240,6 +243,7 @@ function openCategoryForm(existingId) {
     categoryForm.elements.title.value = category?.title || '';
     categoryForm.elements.image.value = category?.iconUrl || '';
     categoryFormTitle.textContent = `تعديل: ${category?.title || ''}`;
+    categoryContentType.value = category?.contentType || 'channels';
     categorySaveButton.textContent = 'حفظ التعديل';
   } else {
     categoryEditId.value = '';
@@ -248,6 +252,7 @@ function openCategoryForm(existingId) {
     categorySaveButton.textContent = 'إضافة القسم';
   }
   categoryParent.value = currentParentId || '';
+  categoryContentType.value = currentParentId ? (currentCategories.find((item) => item.id === currentParentId)?.contentType || activeContentType) : activeContentType;
   categoryFormCard.classList.remove('hidden');
 }
 
@@ -345,6 +350,12 @@ function renderChannelsForCurrentCategory() {
   }).join('');
   channelsList.classList.remove('hidden');
   loadChannelSources(list);
+}
+
+function categoryMatchesContentType(category) {
+  if (currentParentId) return true;
+  // Existing categories without contentType remain in the original Channels area.
+  return (category.contentType || 'channels') === activeContentType;
 }
 
 function renderCurrentCategoryView() {
@@ -959,6 +970,16 @@ function showPanel(panelId) {
   document.querySelectorAll('.admin-panel').forEach((panel) => panel.classList.toggle('hidden', panel.id !== panelId));
 }
 
+contentTypeTabs.forEach((button) => button.addEventListener('click', () => {
+  if (currentParentId) currentParentId = null;
+  activeContentType = button.dataset.contentType || 'channels';
+  contentTypeTabs.forEach((item) => item.classList.toggle('active', item === button));
+  categorySelectMode = false;
+  categoriesBulkBar.classList.add('hidden');
+  closeAllFormCards();
+  renderCurrentCategoryView();
+}));
+
 groupButtons.forEach((button) => button.addEventListener('click', () => {
   groupButtons.forEach((item) => item.classList.toggle('active', item === button));
   const group = button.dataset.group;
@@ -1014,6 +1035,7 @@ function updateCategoriesBulkBar() {
   categoriesBulkDelete.disabled = selectedCategoryIds.size === 0;
   const visibleIds = currentCategories
     .filter((item) => (item.parentId || null) === currentParentId)
+    .filter(categoryMatchesContentType)
     .map((item) => item.id);
   categoriesSelectAll.checked = visibleIds.length > 0 && visibleIds.every((id) => selectedCategoryIds.has(id));
   categoriesSelectAll.indeterminate = selectedCategoryIds.size > 0
@@ -1024,6 +1046,7 @@ function updateCategoriesBulkBar() {
 categoriesSelectAll.addEventListener('change', () => {
   const visibleIds = currentCategories
     .filter((item) => (item.parentId || null) === currentParentId)
+    .filter(categoryMatchesContentType)
     .map((item) => item.id);
   if (categoriesSelectAll.checked) {
     visibleIds.forEach((id) => selectedCategoryIds.add(id));
@@ -1355,12 +1378,13 @@ categoryForm.addEventListener('submit', async (event) => {
   categorySaveButton.textContent = isEdit ? 'جارٍ الحفظ…' : 'جارٍ الإضافة…';
   try {
     if (isEdit) {
-      await updateDoc(doc(db, 'categories', categoryEditId.value), { title, iconUrl: iconUrl || null });
+      await updateDoc(doc(db, 'categories', categoryEditId.value), { title, iconUrl: iconUrl || null, contentType: currentCategories.find((item) => item.id === categoryEditId.value)?.contentType || categoryContentType.value || 'channels' });
     } else {
       await addDoc(collection(db, 'categories'), {
         title,
         iconUrl: iconUrl || null,
         parentId: currentParentId,
+        contentType: currentParentId ? (currentCategories.find((item) => item.id === currentParentId)?.contentType || activeContentType) : activeContentType,
         order: Date.now(),
         isPremium: false,
         createdAt: serverTimestamp(),
