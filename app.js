@@ -112,6 +112,14 @@ const channelCategory = document.querySelector('#channel-category');
 const channelTitle = document.querySelector('#channel-title');
 const channelLogo = document.querySelector('#channel-logo');
 const channelSourceUrl = document.querySelector('#channel-source-url');
+const channelSourceType = document.querySelector('#channel-source-type');
+const channelProtectedToggle = document.querySelector('#channel-protected-toggle');
+const channelProtectionWrap = document.querySelector('#channel-protection-wrap');
+const channelApiReferer = document.querySelector('#channel-api-referer');
+const channelApiUserAgent = document.querySelector('#channel-api-user-agent');
+const channelSourceReferer = document.querySelector('#channel-source-referer');
+const channelSourceUserAgent = document.querySelector('#channel-source-user-agent');
+const channelSourceHelp = document.querySelector('#channel-source-help');
 const channelEditId = document.querySelector('#channel-edit-id');
 const channelFormTitle = document.querySelector('#channel-form-title');
 const channelSaveButton = document.querySelector('#channel-save-button');
@@ -268,33 +276,73 @@ async function openChannelForm(existingId) {
   channelCategory.value = currentParentId;
   channelFormMessage.textContent = '';
   channelFormMessage.classList.remove('error');
-  channelSourceUrl.value = '';
+
+  const setSourceUi = (type) => {
+    const streamType = ['web', 'api'].includes(type) ? type : 'hls';
+    channelSourceType.value = streamType;
+    channelProtectionWrap.classList.toggle('hidden', streamType !== 'hls');
+    const checked = streamType === 'hls' ? channelProtectedToggle.checked : false;
+    channelProtectedToggle.disabled = streamType !== 'hls';
+    if (streamType === 'web') {
+      channelSourceUrl.placeholder = 'https://example.com/live';
+      channelSourceHelp.textContent = 'صفحة ويب: يحفظ الرابط ويحاول المشغل اكتشاف مصدر HLS/MP4 العام تلقائياً، وإذا تعذر التحقق يبقى داخل WebView.';
+    } else if (streamType === 'api') {
+      channelSourceUrl.placeholder = 'http://example.com/api/channel/4';
+      channelSourceHelp.textContent = 'API: يحفظ رابط API المستقر فقط، ويجلب المشغل رابط HLS المؤقت أثناء التشغيل. Headers API للطلب الأول وHeaders التشغيل للرابط النهائي.';
+    } else {
+      channelSourceUrl.placeholder = 'https://example.com/live/playlist.m3u8';
+      channelSourceHelp.textContent = 'HLS: يمكنك تفعيل حماية برابط مؤقت أو إيقافها لحفظ الرابط مباشرة. Referer/User-Agent محفوظان ضمن خصائص التشغيل.';
+    }
+    if (streamType !== 'hls') channelProtectedToggle.checked = false;
+    else channelProtectedToggle.checked = checked;
+  };
+  channelSourceType.onchange = () => setSourceUi(channelSourceType.value);
+
   if (existingId) {
     const channel = currentChannels.find((item) => item.id === existingId);
     if (!channel) return;
     channelEditId.value = channel.id;
     channelTitle.value = channel.title || '';
     channelLogo.value = channel.logoUrl || '';
-    if (channel.streamType === 'hls' && channel.protected !== false) {
+    const streamType = ['web', 'api'].includes(channel.streamType) ? channel.streamType : 'hls';
+    const sourceHeaders = channel.sourceHeaders && typeof channel.sourceHeaders === 'object' ? channel.sourceHeaders : {};
+    const apiHeaders = channel.apiHeaders && typeof channel.apiHeaders === 'object' ? channel.apiHeaders : {};
+    channelApiReferer.value = apiHeaders.referer || '';
+    channelApiUserAgent.value = apiHeaders['user-agent'] || apiHeaders.userAgent || '';
+    channelSourceReferer.value = sourceHeaders.referer || '';
+    channelSourceUserAgent.value = sourceHeaders['user-agent'] || sourceHeaders.userAgent || '';
+    channelProtectedToggle.checked = channel.protected !== false;
+    channelSourceType.value = streamType;
+    if (streamType === 'web' || streamType === 'api') {
+      channelSourceUrl.value = channel.sourceUrl || '';
+    } else if (channel.protected !== false) {
+      channelSourceUrl.value = '';
       try {
         const snapshot = await getDoc(doc(db, 'privateStreams', channel.id));
         channelSourceUrl.value = snapshot.data()?.url || '';
-      } catch (_) { channelSourceUrl.value = ''; }
+      } catch (_) {}
     } else {
-      channelSourceUrl.value = channel.directUrl || channel.sourceUrl || '';
+      channelSourceUrl.value = channel.directUrl || '';
     }
+    setSourceUi(streamType);
     channelFormTitle.textContent = `تعديل: ${channel.title || label}`;
     channelSaveButton.textContent = 'حفظ التعديل';
   } else {
     channelForm.reset();
     channelEditId.value = '';
     channelCategory.value = currentParentId;
+    channelSourceType.value = 'hls';
+    channelProtectedToggle.checked = true;
+    channelApiReferer.value = '';
+    channelApiUserAgent.value = '';
+    channelSourceReferer.value = '';
+    channelSourceUserAgent.value = '';
+    setSourceUi('hls');
     channelFormTitle.textContent = `إضافة ${label} داخل «${parent?.title || ''}»`;
-    channelSaveButton.textContent = 'إضافة';
+    channelSaveButton.textContent = 'حفظ';
   }
   channelFormCard.classList.remove('hidden');
 }
-
 function openMarqueeForm() {
   if (currentParentId === null) return;
   closeAllFormCards();
@@ -332,12 +380,15 @@ function renderChannelsForCurrentCategory() {
   channelsLoading.classList.add('hidden');
   channelsEmpty.innerHTML = CHANNELS_EMPTY_HTML;
   const parent = currentCategories.find((item) => item.id === currentParentId);
-  channelsTitle.textContent = parent?.title ? `قنوات «${parent.title}»` : 'القنوات';
+  const contentType = parent?.contentType || activeContentType;
+  const label = contentEntryLabel(contentType);
+  const collectionLabel = ({ channels: 'قنوات', movies: 'أفلام', series: 'مسلسلات', anime: 'أنمي' }[contentType] || 'محتوى');
+  channelsTitle.textContent = `${collectionLabel} «${parent?.title || ''}»`;
   const list = currentChannels
     .filter((channel) => channel.categoryId === currentParentId)
     .slice()
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  channelsCount.textContent = `${list.length} قناة`;
+  channelsCount.textContent = `${list.length} ${collectionLabel}`;
   if (!list.length) {
     channelsEmpty.classList.remove('hidden');
     channelsList.classList.add('hidden');
@@ -345,24 +396,18 @@ function renderChannelsForCurrentCategory() {
   }
   channelsEmpty.classList.add('hidden');
   channelsList.innerHTML = list.map((channel, index) => {
-    const logo = channel.logoUrl ? `<img class="channel-logo" src="${escapeHtml(channel.logoUrl)}" alt="">` : '<div class="channel-logo category-image-placeholder">⚽</div>';
+    const logo = channel.logoUrl
+      ? `<img class="channel-logo" src="${escapeHtml(channel.logoUrl)}" alt="${escapeHtml(channel.title || '')}" loading="lazy">`
+      : `<div class="channel-logo category-image-placeholder">${contentType === 'anime' ? '🍥' : contentType === 'movies' ? '🎬' : contentType === 'series' ? '📺' : '📺'}</div>`;
     const checkbox = channelSelectMode ? `<label class="select-checkbox-wrap"><input type="checkbox" class="select-checkbox" data-select-channel="${escapeHtml(channel.id)}" ${selectedChannelIds.has(channel.id) ? 'checked' : ''}></label>` : '';
-    const orderControl = `<label class="order-control">الترتيب <input type="number" class="order-input" data-reorder-channel="${escapeHtml(channel.id)}" min="1" max="${list.length}" value="${index + 1}"></label>`;
     const sourceType = ['web', 'api'].includes(channel.streamType) ? channel.streamType : 'hls';
-    const sourcePlaceholder = sourceType === 'web'
-      ? 'https://example.com/live'
-      : sourceType === 'api'
-        ? 'http://example.com/api/channel/4'
-        : 'https://example.com/live/playlist.m3u8';
-    const sourceId = escapeHtml(channel.id);
-    const protectionControl = sourceType === 'web' ? '' : `<label class="protect-toggle"><input type="checkbox" data-protected-toggle="${escapeHtml(channel.id)}" ${channel.protected === false ? '' : 'checked'}> حماية برابط مؤقت</label>`;
-    const apiHeaderFields = `<div class="source-header-grid"><div><label>Referer API <span class="optional-label">اختياري</span></label><input type="url" data-api-referer="${sourceId}" placeholder="https://example.com/"></div><div><label>User-Agent API <span class="optional-label">اختياري</span></label><input type="text" data-api-user-agent="${sourceId}" placeholder="okhttp/4.12.0"></div></div>`;
-    return `<article class="card channel-item">${checkbox}${logo}<div class="channel-info"><h3>${escapeHtml(channel.title || 'قناة بلا اسم')}</h3><p>${escapeHtml(channel.subtitle || 'بدون وصف')}</p>${orderControl}<div class="channel-source"><label>نوع المصدر <select class="source-type-select" data-source-type="${sourceId}"><option value="hls" ${sourceType === 'hls' ? 'selected' : ''}>بث مباشر HLS / m3u8</option><option value="api" ${sourceType === 'api' ? 'selected' : ''}>API ديناميكي / Encoded API</option><option value="web" ${sourceType === 'web' ? 'selected' : ''}>صفحة ويب</option></select></label>${sourceType === 'hls' ? protectionControl : ''}<input type="url" class="source-input" data-source-input="${sourceId}" placeholder="${sourcePlaceholder}"><details class="source-headers"><summary>⚙️ إعدادات Headers (API / التشغيل)</summary>${apiHeaderFields}<div class="source-header-grid"><div><label>Referer التشغيل <span class="optional-label">اختياري</span></label><input type="url" data-source-referer="${sourceId}" placeholder="https://example.com/"></div><div><label>User-Agent التشغيل <span class="optional-label">اختياري</span></label><input type="text" data-source-user-agent="${sourceId}" placeholder="Mozilla/5.0 ..."></div></div><small class="source-help">${sourceType === 'api' ? 'يُحفظ رابط API المستقر فقط. يجلب المشغل رابط HLS المؤقت أثناء التشغيل ولا يحفظه في Firestore. Headers API للطلب الأول، وHeaders التشغيل للرابط النهائي.' : 'تُستخدم قيم التشغيل مع المصدر. اتركها فارغة إذا لم يحتج الرابط إلى Headers خاصة.'}</small></details><button type="button" data-save-source="${sourceId}">حفظ المصدر</button><span class="source-status" data-source-status="${sourceId}"></span>${sourceType === 'web' ? '<small class="source-help">سيحاول المشغل اكتشاف مصدر HLS/MP4 العام من الصفحة تلقائياً، وإذا تعذر التحقق منه يبقى داخل WebView.</small>' : ''}</div></div><div class="channel-actions"><button type="button" data-edit-channel="${sourceId}">تعديل</button><button class="delete-category-button" type="button" data-delete-channel="${sourceId}">حذف</button></div></article>`;
+    const sourceLabel = sourceType === 'web' ? 'صفحة ويب' : sourceType === 'api' ? 'API ديناميكي' : 'HLS / m3u8';
+    const protectionLabel = sourceType === 'hls' ? (channel.protected === false ? 'بدون حماية' : 'حماية برابط مؤقت') : '';
+    const status = [sourceLabel, protectionLabel].filter(Boolean).join(' • ');
+    return `<article class="card channel-item content-item-card">${checkbox}<div class="content-card-media">${logo}</div><div class="channel-info content-card-info"><span class="content-card-number">${index + 1}</span><h3>${escapeHtml(channel.title || `${label} بلا اسم`)}</h3><p class="content-card-source">${escapeHtml(status)}</p></div><div class="channel-actions"><button type="button" data-edit-channel="${escapeHtml(channel.id)}">تعديل</button><button class="delete-category-button" type="button" data-delete-channel="${escapeHtml(channel.id)}">حذف</button></div></article>`;
   }).join('');
   channelsList.classList.remove('hidden');
-  loadChannelSources(list);
 }
-
 function categoryMatchesContentType(category) {
   if (currentParentId) return true;
   // Existing categories without contentType remain in the original Channels area.
@@ -983,9 +1028,12 @@ function showPanel(panelId) {
   document.querySelectorAll('.admin-panel').forEach((panel) => panel.classList.toggle('hidden', panel.id !== panelId));
 }
 
+updateChannelAddMenuLabel();
+
 contentTypeTabs.forEach((button) => button.addEventListener('click', () => {
   if (currentParentId) currentParentId = null;
   activeContentType = button.dataset.contentType || 'channels';
+  updateChannelAddMenuLabel();
   contentTypeTabs.forEach((item) => item.classList.toggle('active', item === button));
   categorySelectMode = false;
   categoriesBulkBar.classList.add('hidden');
@@ -1431,64 +1479,118 @@ categoryForm.addEventListener('submit', async (event) => {
 });
 
 function resetChannelForm() {
-  channelForm.reset(); channelEditId.value = ''; channelFormTitle.textContent = 'إضافة محتوى';
-  channelSaveButton.textContent = 'إضافة'; channelFormMessage.textContent = '';
+  channelForm.reset();
+  channelEditId.value = '';
+  channelSourceType.value = 'hls';
+  channelProtectedToggle.checked = true;
+  channelProtectedToggle.disabled = false;
+  channelProtectionWrap.classList.remove('hidden');
+  channelFormTitle.textContent = 'إضافة محتوى';
+  channelSaveButton.textContent = 'حفظ';
+  channelFormMessage.textContent = '';
+}
+
+function updateChannelAddMenuLabel() {
+  if (!addMenuChannelButton) return;
+  const label = contentEntryLabel(activeContentType);
+  addMenuChannelButton.textContent = `➕ ${label}`;
+}
+
+function readChannelSourceForm() {
+  const streamType = ['web', 'api'].includes(channelSourceType.value) ? channelSourceType.value : 'hls';
+  const url = channelSourceUrl.value.trim();
+  const sourceHeaders = {};
+  const apiHeaders = {};
+  const sourceReferer = channelSourceReferer.value.trim();
+  const sourceUserAgent = channelSourceUserAgent.value.trim();
+  const apiReferer = channelApiReferer.value.trim();
+  const apiUserAgent = channelApiUserAgent.value.trim();
+  if (sourceReferer) sourceHeaders.referer = sourceReferer;
+  if (sourceUserAgent) sourceHeaders['user-agent'] = sourceUserAgent;
+  if (apiReferer) apiHeaders.referer = apiReferer;
+  if (apiUserAgent) apiHeaders['user-agent'] = apiUserAgent;
+  return { streamType, url, protected: streamType === 'hls' ? channelProtectedToggle.checked : false, sourceHeaders, apiHeaders };
 }
 
 channelForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!currentParentId || !channelTitle.value.trim()) return;
-  const sourceUrl = channelSourceUrl.value.trim();
-  const data = { categoryId: currentParentId, title: channelTitle.value.trim(), logoUrl: channelLogo.value.trim() || null, updatedAt: serverTimestamp() };
+  const source = readChannelSourceForm();
+  if (!source.url) {
+    channelFormMessage.textContent = 'أدخل رابط المصدر أولاً.';
+    channelFormMessage.classList.add('error');
+    return;
+  }
+  if (!/^https?:\/\//i.test(source.url)) {
+    channelFormMessage.textContent = 'رابط المصدر يجب أن يبدأ بـ http:// أو https://';
+    channelFormMessage.classList.add('error');
+    return;
+  }
+  if (source.streamType === 'api' && /\.(m3u8?|mpd|mp4)(?:[?#]|$)/i.test(source.url)) {
+    channelFormMessage.textContent = 'مصدر API يجب أن يكون رابط API مستقراً، وليس رابط m3u8/فيديو مؤقتاً.';
+    channelFormMessage.classList.add('error');
+    return;
+  }
+  channelFormMessage.textContent = '';
+  channelFormMessage.classList.remove('error');
+  const data = {
+    categoryId: currentParentId,
+    title: channelTitle.value.trim(),
+    logoUrl: channelLogo.value.trim() || null,
+    updatedAt: serverTimestamp(),
+    streamType: source.streamType,
+    protected: source.protected,
+    directUrl: null,
+    sourceUrl: null,
+    sourceHeaders: source.sourceHeaders,
+    apiHeaders: source.apiHeaders,
+  };
   channelSaveButton.disabled = true;
+  channelSaveButton.textContent = 'جارٍ الحفظ…';
   try {
     let channelId = channelEditId.value;
     if (channelId) {
       await updateDoc(doc(db, 'channels', channelId), data);
     } else {
-      const created = await addDoc(collection(db, 'channels'), { ...data, viewCount: 0, order: Date.now(), createdAt: serverTimestamp(), streamType: 'hls', protected: true, directUrl: null, sourceUrl: null, sourceHeaders: {}, apiHeaders: {} });
+      const created = await addDoc(collection(db, 'channels'), { ...data, viewCount: 0, order: Date.now(), createdAt: serverTimestamp() });
       channelId = created.id;
     }
 
-    // المصدر الوحيد في نموذج الإضافة يُحفظ مع الحفاظ على نظام الحماية الحالي.
-    if (sourceUrl) {
-      const existing = currentChannels.find((item) => item.id === channelId);
-      const streamType = ['web', 'api', 'hls'].includes(existing?.streamType) ? existing.streamType : 'hls';
-      if (streamType === 'web' || streamType === 'api') {
-        await updateDoc(doc(db, 'channels', channelId), { streamType, sourceUrl, protected: false, directUrl: null });
-      } else {
-        await setDoc(doc(db, 'privateStreams', channelId), { url: sourceUrl, updatedAt: serverTimestamp() }, { merge: true });
-        await updateDoc(doc(db, 'channels', channelId), { streamType: 'hls', sourceUrl: null, protected: true, directUrl: null });
-      }
+    if (source.streamType === 'web' || source.streamType === 'api') {
+      await updateDoc(doc(db, 'channels', channelId), {
+        streamType: source.streamType,
+        sourceUrl: source.url,
+        protected: false,
+        directUrl: null,
+        sourceHeaders: source.sourceHeaders,
+        apiHeaders: source.streamType === 'api' ? source.apiHeaders : {},
+      });
+    } else if (source.protected) {
+      await setDoc(doc(db, 'privateStreams', channelId), { url: source.url, updatedAt: serverTimestamp() }, { merge: true });
+      await updateDoc(doc(db, 'channels', channelId), {
+        streamType: 'hls', sourceUrl: null, protected: true, directUrl: null,
+        sourceHeaders: source.sourceHeaders, apiHeaders: {},
+      });
+    } else {
+      await updateDoc(doc(db, 'channels', channelId), {
+        streamType: 'hls', sourceUrl: null, protected: false, directUrl: source.url,
+        sourceHeaders: source.sourceHeaders, apiHeaders: {},
+      });
     }
-    resetChannelForm(); closeAllFormCards(); await loadChannels();
-  } catch (_) { channelFormMessage.textContent = 'تعذر حفظ المحتوى. تحقق من قواعد Firestore.'; channelFormMessage.classList.add('error'); }
-  finally { channelSaveButton.disabled = false; }
+    resetChannelForm();
+    closeAllFormCards();
+    await loadChannels();
+  } catch (_) {
+    channelFormMessage.textContent = 'تعذر حفظ المحتوى. تحقق من قواعد Firestore.';
+    channelFormMessage.classList.add('error');
+  } finally {
+    channelSaveButton.disabled = false;
+    channelSaveButton.textContent = channelEditId.value ? 'حفظ التعديل' : 'حفظ';
+  }
 });
+
 channelCloseButton.addEventListener('click', () => { resetChannelForm(); closeAllFormCards(); });
 channelsList.addEventListener('change', (event) => {
-  const typeSelect = event.target.closest('[data-source-type]');
-  if (typeSelect) {
-    const id = typeSelect.dataset.sourceType;
-    const input = document.querySelector(`[data-source-input="${id}"]`);
-    if (input) input.placeholder = typeSelect.value === 'web'
-      ? 'https://example.com/live'
-      : typeSelect.value === 'api'
-        ? 'http://example.com/api/channel/4'
-        : 'https://example.com/live/playlist.m3u8';
-    // إبقاء خيار الحماية ظاهراً عند الرجوع إلى HLS أثناء تعديل القناة.
-    const sourceWrap = typeSelect.closest('.channel-source');
-    const existingToggle = sourceWrap?.querySelector('[data-protected-toggle]');
-    if (typeSelect.value === 'hls' && !existingToggle && sourceWrap) {
-      const label = document.createElement('label');
-      label.className = 'protect-toggle';
-      label.innerHTML = `<input type="checkbox" data-protected-toggle="${id}" checked> حماية برابط مؤقت`;
-      typeSelect.insertAdjacentElement('afterend', label);
-    } else if (typeSelect.value !== 'hls' && existingToggle) {
-      existingToggle.closest('.protect-toggle')?.remove();
-    }
-    return;
-  }
   const input = event.target.closest('[data-reorder-channel]');
   if (!input) return;
   const newPosition = parseInt(input.value, 10);

@@ -127,9 +127,31 @@
           <form id="channel-form" class="channel-form">
             <input id="channel-edit-id" type="hidden" />
             <input id="channel-category" type="hidden" />
-            <div><label for="channel-title">الاسم</label><input id="channel-title" required maxlength="100" placeholder="اسم القناة أو الفيلم أو المسلسل أو الأنمي" /></div>
-            <div><label for="channel-logo">الشعار</label><input id="channel-logo" type="url" placeholder="رابط الشعار" /></div>
-            <div><label for="channel-source-url">المصدر</label><input id="channel-source-url" type="url" placeholder="رابط المصدر" /></div>
+
+            <div class="content-basic-field"><label for="channel-title">الاسم</label><input id="channel-title" required maxlength="100" placeholder="اسم القناة أو الفيلم أو المسلسل أو الأنمي" /></div>
+            <div class="content-basic-field"><label for="channel-logo">الشعار</label><input id="channel-logo" type="url" placeholder="رابط الشعار" /></div>
+
+            <fieldset class="source-settings-card">
+              <legend>المصدر وخصائصه</legend>
+              <div class="source-settings-grid">
+                <div><label for="channel-source-type">نوع المصدر</label><select id="channel-source-type"><option value="hls">بث مباشر HLS / m3u8</option><option value="api">API ديناميكي / Encoded API</option><option value="web">صفحة ويب</option></select></div>
+                <div><label for="channel-source-url">رابط المصدر</label><input id="channel-source-url" type="url" placeholder="https://example.com/live/playlist.m3u8" /></div>
+                <label id="channel-protection-wrap" class="protect-toggle source-protection"><input id="channel-protected-toggle" type="checkbox" checked> حماية برابط مؤقت</label>
+              </div>
+              <details class="source-advanced" open>
+                <summary>⚙️ إعدادات Headers وخصائص التشغيل</summary>
+                <div class="source-header-grid">
+                  <div><label for="channel-api-referer">Referer API <span class="optional-label">اختياري</span></label><input id="channel-api-referer" type="url" placeholder="https://example.com/" /></div>
+                  <div><label for="channel-api-user-agent">User-Agent API <span class="optional-label">اختياري</span></label><input id="channel-api-user-agent" type="text" placeholder="okhttp/4.12.0" /></div>
+                </div>
+                <div class="source-header-grid">
+                  <div><label for="channel-source-referer">Referer التشغيل <span class="optional-label">اختياري</span></label><input id="channel-source-referer" type="url" placeholder="https://example.com/" /></div>
+                  <div><label for="channel-source-user-agent">User-Agent التشغيل <span class="optional-label">اختياري</span></label><input id="channel-source-user-agent" type="text" placeholder="Mozilla/5.0 ..." /></div>
+                </div>
+                <p id="channel-source-help" class="source-help">HLS: يمكن حماية الرابط برابط مؤقت. API: يحفظ رابط API المستقر ويجلب الرابط النهائي وقت التشغيل. Web: يحفظ صفحة المصدر ويحاول المشغل اكتشاف المصدر تلقائياً.</p>
+              </details>
+            </fieldset>
+
             <p id="channel-form-message" class="form-message" role="status"></p>
             <div class="form-card-actions">
               <button id="channel-save-button" type="submit">حفظ</button>
