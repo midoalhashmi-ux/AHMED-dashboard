@@ -220,4 +220,5 @@ textarea:focus { border-color: #38bdf8; }
 .source-header-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
 .source-header-grid label { display: block; margin-bottom: 4px; }
 .source-header-grid input { width: 100%; box-sizing: border-box; }
+.source-header-grid + .source-header-grid { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(127,127,127,.15); }
 @media (max-width: 700px) { .source-header-grid { grid-template-columns: 1fr; } }

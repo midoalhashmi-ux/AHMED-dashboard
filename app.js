@@ -332,11 +332,16 @@ function renderChannelsForCurrentCategory() {
     const logo = channel.logoUrl ? `<img class="channel-logo" src="${escapeHtml(channel.logoUrl)}" alt="">` : '<div class="channel-logo category-image-placeholder">⚽</div>';
     const checkbox = channelSelectMode ? `<label class="select-checkbox-wrap"><input type="checkbox" class="select-checkbox" data-select-channel="${escapeHtml(channel.id)}" ${selectedChannelIds.has(channel.id) ? 'checked' : ''}></label>` : '';
     const orderControl = `<label class="order-control">الترتيب <input type="number" class="order-input" data-reorder-channel="${escapeHtml(channel.id)}" min="1" max="${list.length}" value="${index + 1}"></label>`;
-    const sourceType = channel.streamType === 'web' ? 'web' : 'hls';
-    const sourcePlaceholder = sourceType === 'web' ? 'https://example.com/live' : 'https://example.com/live/playlist.m3u8';
-    const protectionControl = sourceType === 'web' ? '' : `<label class="protect-toggle"><input type="checkbox" data-protected-toggle="${escapeHtml(channel.id)}" ${channel.protected === false ? '' : 'checked'}> حماية برابط مؤقت</label>`;
+    const sourceType = ['web', 'api'].includes(channel.streamType) ? channel.streamType : 'hls';
+    const sourcePlaceholder = sourceType === 'web'
+      ? 'https://example.com/live'
+      : sourceType === 'api'
+        ? 'http://example.com/api/channel/4'
+        : 'https://example.com/live/playlist.m3u8';
     const sourceId = escapeHtml(channel.id);
-    return `<article class="card channel-item">${checkbox}${logo}<div class="channel-info"><h3>${escapeHtml(channel.title || 'قناة بلا اسم')}</h3><p>${escapeHtml(channel.subtitle || 'بدون وصف')}</p>${orderControl}<div class="channel-source"><label>نوع المصدر <select class="source-type-select" data-source-type="${sourceId}"><option value="hls" ${sourceType === 'hls' ? 'selected' : ''}>بث مباشر HLS / m3u8</option><option value="web" ${sourceType === 'web' ? 'selected' : ''}>صفحة ويب</option></select></label>${protectionControl}<input type="url" class="source-input" data-source-input="${sourceId}" placeholder="${sourcePlaceholder}"><details class="source-headers"><summary>⚙️ إعدادات الطلب (Referer / User-Agent)</summary><div class="source-header-grid"><div><label>Referer <span class="optional-label">اختياري</span></label><input type="url" data-source-referer="${sourceId}" placeholder="https://example.com/"></div><div><label>User-Agent <span class="optional-label">اختياري</span></label><input type="text" data-source-user-agent="${sourceId}" placeholder="Mozilla/5.0 ..."></div></div><small class="source-help">تُستخدم هذه القيم مع طلب المصدر. اتركها فارغة إذا لم يحتج الرابط إلى Headers خاصة.</small></details><button type="button" data-save-source="${sourceId}">حفظ المصدر</button><span class="source-status" data-source-status="${sourceId}"></span>${sourceType === 'web' ? '<small class="source-help">سيحاول المشغل اكتشاف مصدر HLS/MP4 العام من الصفحة تلقائياً، وإذا تعذر التحقق منه يبقى داخل WebView.</small>' : ''}</div></div><div class="channel-actions"><button type="button" data-edit-channel="${sourceId}">تعديل</button><button class="delete-category-button" type="button" data-delete-channel="${sourceId}">حذف</button></div></article>`;
+    const protectionControl = sourceType === 'web' ? '' : `<label class="protect-toggle"><input type="checkbox" data-protected-toggle="${escapeHtml(channel.id)}" ${channel.protected === false ? '' : 'checked'}> حماية برابط مؤقت</label>`;
+    const apiHeaderFields = `<div class="source-header-grid"><div><label>Referer API <span class="optional-label">اختياري</span></label><input type="url" data-api-referer="${sourceId}" placeholder="https://example.com/"></div><div><label>User-Agent API <span class="optional-label">اختياري</span></label><input type="text" data-api-user-agent="${sourceId}" placeholder="okhttp/4.12.0"></div></div>`;
+    return `<article class="card channel-item">${checkbox}${logo}<div class="channel-info"><h3>${escapeHtml(channel.title || 'قناة بلا اسم')}</h3><p>${escapeHtml(channel.subtitle || 'بدون وصف')}</p>${orderControl}<div class="channel-source"><label>نوع المصدر <select class="source-type-select" data-source-type="${sourceId}"><option value="hls" ${sourceType === 'hls' ? 'selected' : ''}>بث مباشر HLS / m3u8</option><option value="api" ${sourceType === 'api' ? 'selected' : ''}>API ديناميكي / Encoded API</option><option value="web" ${sourceType === 'web' ? 'selected' : ''}>صفحة ويب</option></select></label>${sourceType === 'hls' ? protectionControl : ''}<input type="url" class="source-input" data-source-input="${sourceId}" placeholder="${sourcePlaceholder}"><details class="source-headers"><summary>⚙️ إعدادات Headers (API / التشغيل)</summary>${apiHeaderFields}<div class="source-header-grid"><div><label>Referer التشغيل <span class="optional-label">اختياري</span></label><input type="url" data-source-referer="${sourceId}" placeholder="https://example.com/"></div><div><label>User-Agent التشغيل <span class="optional-label">اختياري</span></label><input type="text" data-source-user-agent="${sourceId}" placeholder="Mozilla/5.0 ..."></div></div><small class="source-help">${sourceType === 'api' ? 'يُحفظ رابط API المستقر فقط. يجلب المشغل رابط HLS المؤقت أثناء التشغيل ولا يحفظه في Firestore. Headers API للطلب الأول، وHeaders التشغيل للرابط النهائي.' : 'تُستخدم قيم التشغيل مع المصدر. اتركها فارغة إذا لم يحتج الرابط إلى Headers خاصة.'}</small></details><button type="button" data-save-source="${sourceId}">حفظ المصدر</button><span class="source-status" data-source-status="${sourceId}"></span>${sourceType === 'web' ? '<small class="source-help">سيحاول المشغل اكتشاف مصدر HLS/MP4 العام من الصفحة تلقائياً، وإذا تعذر التحقق منه يبقى داخل WebView.</small>' : ''}</div></div><div class="channel-actions"><button type="button" data-edit-channel="${sourceId}">تعديل</button><button class="delete-category-button" type="button" data-delete-channel="${sourceId}">حذف</button></div></article>`;
   }).join('');
   channelsList.classList.remove('hidden');
   loadChannelSources(list);
@@ -487,9 +492,10 @@ async function loadChannels() {
   }
 }
 
-// مصادر البث الحقيقية (روابط m3u8) محفوظة في مجموعة منفصلة privateStreams
-// لا يقرأها تطبيق المحتوى أبداً — فقط لوحة التحكم (بعد تسجيل الدخول) والـ Cloud Function.
-// القنوات غير المحمية تُحفظ مباشرة داخل channels.directUrl (قراءة عامة، بدون تأخير التوكن).
+// روابط HLS المحمية القديمة محفوظة في privateStreams، أما المصدر الديناميكي
+// فيحفظ عنوان API المستقر فقط داخل channels.sourceUrl. لا يقرأ تطبيق المحتوى
+// هذه التفاصيل أبداً؛ المشغل المنفصل يحل المصدر عند التشغيل. القنوات غير
+// المحمية تُحفظ مباشرة داخل channels.directUrl (قراءة عامة، بدون تأخير التوكن).
 async function loadChannelSources(channels) {
   await Promise.all(channels.map(async (channel) => {
     const input = document.querySelector(`[data-source-input="${channel.id}"]`);
@@ -497,15 +503,20 @@ async function loadChannelSources(channels) {
     const status = document.querySelector(`[data-source-status="${channel.id}"]`);
     if (!input) return;
     const sourceHeaders = channel.sourceHeaders && typeof channel.sourceHeaders === 'object' ? channel.sourceHeaders : {};
+    const apiHeaders = channel.apiHeaders && typeof channel.apiHeaders === 'object' ? channel.apiHeaders : {};
     const refererInput = document.querySelector(`[data-source-referer="${channel.id}"]`);
     const userAgentInput = document.querySelector(`[data-source-user-agent="${channel.id}"]`);
+    const apiRefererInput = document.querySelector(`[data-api-referer="${channel.id}"]`);
+    const apiUserAgentInput = document.querySelector(`[data-api-user-agent="${channel.id}"]`);
     if (refererInput) refererInput.value = sourceHeaders.referer || '';
     if (userAgentInput) userAgentInput.value = sourceHeaders['user-agent'] || sourceHeaders.userAgent || '';
-    const streamType = channel.streamType === 'web' ? 'web' : 'hls';
+    if (apiRefererInput) apiRefererInput.value = apiHeaders.referer || '';
+    if (apiUserAgentInput) apiUserAgentInput.value = apiHeaders['user-agent'] || apiHeaders.userAgent || '';
+    const streamType = ['web', 'api'].includes(channel.streamType) ? channel.streamType : 'hls';
     if (typeSelect) typeSelect.value = streamType;
-    if (streamType === 'web' && channel.sourceUrl) {
+    if ((streamType === 'web' || streamType === 'api') && channel.sourceUrl) {
       input.value = channel.sourceUrl;
-      if (status) status.textContent = 'محفوظ كرابط صفحة ويب';
+      if (status) status.textContent = streamType === 'api' ? 'محفوظ كرابط API مستقر (بدون m3u8 مؤقت)' : 'محفوظ كرابط صفحة ويب';
       return;
     }
     const isProtected = channel.protected !== false;
@@ -534,35 +545,54 @@ async function saveChannelSource(channelId) {
   const typeSelect = document.querySelector(`[data-source-type="${channelId}"]`);
   const refererInput = document.querySelector(`[data-source-referer="${channelId}"]`);
   const userAgentInput = document.querySelector(`[data-source-user-agent="${channelId}"]`);
+  const apiRefererInput = document.querySelector(`[data-api-referer="${channelId}"]`);
+  const apiUserAgentInput = document.querySelector(`[data-api-user-agent="${channelId}"]`);
   if (!input) return;
   const url = input.value.trim();
   const referer = refererInput?.value.trim() || '';
   const userAgent = userAgentInput?.value.trim() || '';
+  const apiReferer = apiRefererInput?.value.trim() || '';
+  const apiUserAgent = apiUserAgentInput?.value.trim() || '';
   const sourceHeaders = {};
+  const apiHeaders = {};
   if (referer) sourceHeaders.referer = referer;
   if (userAgent) sourceHeaders['user-agent'] = userAgent;
-  const streamType = typeSelect?.value === 'web' ? 'web' : 'hls';
+  if (apiReferer) apiHeaders.referer = apiReferer;
+  if (apiUserAgent) apiHeaders['user-agent'] = apiUserAgent;
+  const streamType = ['web', 'api'].includes(typeSelect?.value) ? typeSelect.value : 'hls';
   if (!url) { if (status) { status.textContent = 'أدخل رابط المصدر أولاً'; status.classList.add('error'); } return; }
   if (!/^https?:\/\//i.test(url)) { if (status) { status.textContent = 'الرابط يجب أن يبدأ بـ http:// أو https://'; status.classList.add('error'); } return; }
+  if (streamType === 'api' && /\.(m3u8?|mpd|mp4)(?:[?#]|$)/i.test(url)) {
+    if (status) {
+      status.textContent = 'مصدر API يجب أن يكون رابط API مستقراً، وليس رابط m3u8/فيديو مؤقتاً.';
+      status.classList.add('error');
+    }
+    return;
+  }
   if (button) { button.disabled = true; button.textContent = 'جارٍ الحفظ…'; }
   if (status) status.classList.remove('error');
   try {
     if (streamType === 'web') {
-      await updateDoc(doc(db, 'channels', channelId), { streamType: 'web', sourceUrl: url, protected: false, directUrl: null, sourceHeaders });
+      await updateDoc(doc(db, 'channels', channelId), { streamType: 'web', sourceUrl: url, protected: false, directUrl: null, sourceHeaders, apiHeaders: {} });
       if (status) status.textContent = 'تم الحفظ ✓ صفحة ويب';
+    } else if (streamType === 'api') {
+      await updateDoc(doc(db, 'channels', channelId), { streamType: 'api', sourceUrl: url, protected: false, directUrl: null, sourceHeaders, apiHeaders });
+      if (status) status.textContent = 'تم الحفظ ✓ API مستقر (سيُجلب m3u8 وقت التشغيل)';
     } else {
       const isProtected = protectedToggle ? protectedToggle.checked : true;
       if (isProtected) {
         await setDoc(doc(db, 'privateStreams', channelId), { url, updatedAt: serverTimestamp() }, { merge: true });
-        await updateDoc(doc(db, 'channels', channelId), { streamType: 'hls', sourceUrl: null, protected: true, directUrl: null, sourceHeaders });
+        await updateDoc(doc(db, 'channels', channelId), { streamType: 'hls', sourceUrl: null, protected: true, directUrl: null, sourceHeaders, apiHeaders: {} });
         if (status) status.textContent = 'تم الحفظ ✓ HLS محمي برابط مؤقت';
       } else {
-        await updateDoc(doc(db, 'channels', channelId), { streamType: 'hls', sourceUrl: null, protected: false, directUrl: url, sourceHeaders });
+        await updateDoc(doc(db, 'channels', channelId), { streamType: 'hls', sourceUrl: null, protected: false, directUrl: url, sourceHeaders, apiHeaders: {} });
         if (status) status.textContent = 'تم الحفظ ✓ HLS بدون حماية';
       }
     }
     const channel = currentChannels.find((item) => item.id === channelId);
-    if (channel) Object.assign(channel, streamType === 'web' ? { streamType: 'web', sourceUrl: url, protected: false, directUrl: null, sourceHeaders } : { streamType: 'hls', sourceHeaders });
+    if (channel) Object.assign(channel, streamType === 'web' || streamType === 'api'
+      ? { streamType, sourceUrl: url, protected: false, directUrl: null, sourceHeaders, apiHeaders }
+      : { streamType: 'hls', sourceHeaders, apiHeaders: {} });
   } catch (_) {
     if (status) { status.textContent = 'تعذر الحفظ. تحقق من قواعد Firestore.'; status.classList.add('error'); }
   } finally {
@@ -1233,8 +1263,9 @@ bulkForm.addEventListener('submit', async (event) => {
           status: ch.status || 'live',
           logoUrl: ch.logoUrl || null,
           playerChannelKey: ch.playerChannelKey || null,
-          streamType: ch.streamType === 'web' ? 'web' : 'hls',
-          sourceUrl: ch.streamType === 'web' ? (ch.sourceUrl || ch.streamUrl || null) : null,
+           streamType: ['web', 'api'].includes(ch.streamType) ? ch.streamType : 'hls',
+           sourceUrl: ['web', 'api'].includes(ch.streamType) ? (ch.sourceUrl || ch.apiUrl || ch.streamUrl || null) : null,
+           apiHeaders: ch.apiHeaders && typeof ch.apiHeaders === 'object' ? ch.apiHeaders : {},
           sourceHeaders: ch.sourceHeaders && typeof ch.sourceHeaders === 'object' ? ch.sourceHeaders : {},
           viewCount: 0,
           order: baseOrder + channelOrderCounter,
@@ -1373,7 +1404,11 @@ channelsList.addEventListener('change', (event) => {
   if (typeSelect) {
     const id = typeSelect.dataset.sourceType;
     const input = document.querySelector(`[data-source-input="${id}"]`);
-    if (input) input.placeholder = typeSelect.value === 'web' ? 'https://example.com/live' : 'https://example.com/live/playlist.m3u8';
+    if (input) input.placeholder = typeSelect.value === 'web'
+      ? 'https://example.com/live'
+      : typeSelect.value === 'api'
+        ? 'http://example.com/api/channel/4'
+        : 'https://example.com/live/playlist.m3u8';
     return;
   }
   const input = event.target.closest('[data-reorder-channel]');
