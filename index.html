@@ -225,7 +225,16 @@
           </div>
           <section id="channels-loading" class="card loading-card hidden"><span class="spinner"></span><p>جارٍ قراءة القنوات…</p></section>
           <section id="channels-empty" class="card message-card hidden" role="status"><h2>لا توجد قنوات بعد</h2><p>أضف أول قناة من زر «+ إضافة» أعلاه.</p></section>
-          <section id="channels-list" class="channels-list hidden"></section>
+          
+<div id="contentSortControl" class="content-sort-control" dir="rtl">
+  <label for="contentSortSelect">ترتيب الكروت</label>
+  <select id="contentSortSelect" aria-label="ترتيب الكروت">
+    <option value="asc">تصاعدي 1 ← 2 ← 3</option>
+    <option value="desc">تنازلي 50 ← 49 ← 48</option>
+  </select>
+</div>
+
+<section id="channels-list" class="channels-list hidden"></section>
         </section>
         </section>
 

@@ -389,3 +389,8 @@ textarea:focus { border-color: #38bdf8; }
   padding: 10px;
   background: #17233a;
 }
+
+
+.content-sort-control{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 16px;padding:10px 14px;border-radius:12px;background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,.08)}
+.content-sort-control label{font-weight:700}
+.content-sort-control select{padding:8px 12px;border-radius:9px;border:1px solid rgba(0,0,0,.15);background:inherit;color:inherit}

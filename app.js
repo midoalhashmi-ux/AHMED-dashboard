@@ -34,6 +34,49 @@ try {
   adminSyncSecret = sessionStorage.getItem(SYNC_SECRET_STORAGE_KEY) || '';
 } catch (_) {}
 
+
+// Content card sort order: ascending / descending by episode/card number.
+// Stored in localStorage for the dashboard and applied to the rendered list.
+// The underlying Firestore order values are preserved; this only changes display order.
+const CONTENT_SORT_STORAGE_KEY = 'contentCardSortOrder';
+
+function getContentCardSortOrder() {
+  return localStorage.getItem(CONTENT_SORT_STORAGE_KEY) === 'desc' ? 'desc' : 'asc';
+}
+
+function setContentCardSortOrder(order) {
+  const value = order === 'desc' ? 'desc' : 'asc';
+  localStorage.setItem(CONTENT_SORT_STORAGE_KEY, value);
+  return value;
+}
+
+function extractCardNumber(item) {
+  const candidates = [
+    item?.episodeNumber,
+    item?.episode,
+    item?.number,
+    item?.order
+  ];
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  const title = String(item?.title || '');
+  const match = title.match(/(?:الحلقة|episode|ep|#)\s*([0-9]+)/i) || title.match(/([0-9]+)(?!.*[0-9])/);
+  return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
+}
+
+function sortContentCards(items) {
+  const order = getContentCardSortOrder();
+  return [...items].sort((a, b) => {
+    const na = extractCardNumber(a);
+    const nb = extractCardNumber(b);
+    if (na !== nb) return order === 'desc' ? nb - na : na - nb;
+    return String(a?.title || '').localeCompare(String(b?.title || ''), 'ar');
+  });
+}
+
+
 function getAdminSyncSecret() {
   if (adminSyncSecret) return adminSyncSecret;
   const value = window.prompt('أدخل مفتاح مزامنة المباريات الخاص بالـ Worker:');
