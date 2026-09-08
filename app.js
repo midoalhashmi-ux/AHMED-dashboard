@@ -230,6 +230,20 @@ function closeAllFormCards() {
   bulkFormCard.classList.add('hidden');
 }
 
+// بعد فتح أي نموذج، انقل الشاشة تلقائياً إلى مكان النموذج بدل إبقائه أعلى الصفحة.
+function scrollToFormCard(card, focusSelector) {
+  if (!card) return;
+  requestAnimationFrame(() => {
+    card.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+    if (focusSelector) {
+      const field = card.querySelector(focusSelector);
+      if (field && typeof field.focus === 'function') {
+        setTimeout(() => field.focus({ preventScroll: true }), 220);
+      }
+    }
+  });
+}
+
 function updateAddMenuAvailability() {
   const disabled = currentParentId === null;
   addMenuChannelButton.disabled = disabled;
@@ -261,6 +275,7 @@ function openCategoryForm(existingId) {
   categoryParent.value = currentParentId || '';
   categoryContentType.value = currentParentId ? (currentCategories.find((item) => item.id === currentParentId)?.contentType || activeContentType) : activeContentType;
   categoryFormCard.classList.remove('hidden');
+  scrollToFormCard(categoryFormCard, '[name=title]');
 }
 
 function contentEntryLabel(contentType) {
@@ -342,6 +357,7 @@ async function openChannelForm(existingId) {
     channelSaveButton.textContent = 'حفظ';
   }
   channelFormCard.classList.remove('hidden');
+  scrollToFormCard(channelFormCard, '#channel-title');
 }
 function openMarqueeForm() {
   if (currentParentId === null) return;
@@ -352,6 +368,7 @@ function openMarqueeForm() {
   marqueeFormMessage.textContent = '';
   marqueeFormMessage.classList.remove('error');
   marqueeFormCard.classList.remove('hidden');
+  scrollToFormCard(marqueeFormCard, '#marquee-text');
 }
 
 function openBulkForm() {
@@ -359,6 +376,7 @@ function openBulkForm() {
   bulkFormMessage.textContent = '';
   bulkFormMessage.classList.remove('error');
   bulkFormCard.classList.remove('hidden');
+  scrollToFormCard(bulkFormCard, 'textarea, input, select');
 }
 
 function renderMarqueePreview() {
@@ -1299,30 +1317,52 @@ bulkCloseButton.addEventListener('click', () => {
   bulkForm.reset();
   closeAllFormCards();
 });
+async function commitBulkOperations(operations) {
+  let batch = writeBatch(db);
+  let count = 0;
+  for (const op of operations) {
+    op(batch);
+    count += 1;
+    if (count >= 450) {
+      await batch.commit();
+      batch = writeBatch(db);
+      count = 0;
+    }
+  }
+  if (count) await batch.commit();
+}
+
+function normalizeSource(item) {
+  const streamType = ['web', 'api'].includes(item.streamType) ? item.streamType : 'hls';
+  const protectedValue = streamType === 'hls' ? item.protected !== false : false;
+  const sourceUrl = item.sourceUrl || item.apiUrl || item.streamUrl || null;
+  const apiHeaders = item.apiHeaders && typeof item.apiHeaders === 'object' ? item.apiHeaders : {};
+  const sourceHeaders = item.sourceHeaders && typeof item.sourceHeaders === 'object' ? item.sourceHeaders : {};
+  return { streamType, protectedValue, sourceUrl, apiHeaders, sourceHeaders };
+}
+
 bulkForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   bulkFormMessage.textContent = '';
   bulkFormMessage.classList.remove('error');
 
   let data;
-  try {
-    data = JSON.parse(bulkTextarea.value);
-  } catch (_) {
+  try { data = JSON.parse(bulkTextarea.value); }
+  catch (_) {
     bulkFormMessage.textContent = 'صيغة JSON غير صحيحة. تأكد من نسخ النص كاملاً.';
     bulkFormMessage.classList.add('error');
     return;
   }
 
-  const categories = Array.isArray(data.categories) ? data.categories : [];
-  const looseChannels = Array.isArray(data.channels) ? data.channels : [];
-
-  if (!categories.length && !looseChannels.length) {
-    bulkFormMessage.textContent = 'لم يتم العثور على أقسام أو قنوات في النص.';
+  const rootCategories = Array.isArray(data.categories) ? data.categories : [];
+  const rootItems = Array.isArray(data.items) ? data.items : (Array.isArray(data.channels) ? data.channels : []);
+  if (!rootCategories.length && !rootItems.length) {
+    bulkFormMessage.textContent = 'لم يتم العثور على categories أو items/channels.';
     bulkFormMessage.classList.add('error');
     return;
   }
-  if (looseChannels.length && currentParentId === null) {
-    bulkFormMessage.textContent = 'لإضافة قنوات مباشرة بدون قسم جديد، افتح قسماً أولاً، أو ضعها داخل "categories".';
+  if (rootItems.length && currentParentId === null) {
+    bulkFormMessage.textContent = 'العناصر المباشرة تحتاج فتح قسم أولاً، أو ضعها داخل categories.';
     bulkFormMessage.classList.add('error');
     return;
   }
@@ -1330,76 +1370,82 @@ bulkForm.addEventListener('submit', async (event) => {
   bulkSaveButton.disabled = true;
   bulkSaveButton.textContent = 'جارٍ الاستيراد…';
   try {
-    const batch = writeBatch(db);
+    const operations = [];
+    const privateStreamOperations = [];
     const baseOrder = Date.now();
     let categoryCount = 0;
-    let channelCount = 0;
-    let channelOrderCounter = 0;
+    let itemCount = 0;
+    let protectedCount = 0;
 
-    categories.forEach((cat, index) => {
-      const categoryRef = doc(collection(db, 'categories'));
-      batch.set(categoryRef, {
-        title: cat.title,
-        iconUrl: cat.iconUrl || null,
-        marqueeText: cat.marqueeText || null,
-        isPremium: Boolean(cat.isPremium),
-        parentId: currentParentId,
-        order: baseOrder + index,
-        createdAt: serverTimestamp(),
-      });
-      categoryCount += 1;
-
-      const channels = Array.isArray(cat.channels) ? cat.channels : [];
-      channels.forEach((ch) => {
-        const channelRef = doc(collection(db, 'channels'));
-        batch.set(channelRef, {
-          categoryId: categoryRef.id,
-          title: ch.title,
-          subtitle: ch.subtitle || '',
-          status: ch.status || 'live',
-          logoUrl: ch.logoUrl || null,
-          playerChannelKey: ch.playerChannelKey || null,
-           streamType: ['web', 'api'].includes(ch.streamType) ? ch.streamType : 'hls',
-           sourceUrl: ['web', 'api'].includes(ch.streamType) ? (ch.sourceUrl || ch.apiUrl || ch.streamUrl || null) : null,
-           apiHeaders: ch.apiHeaders && typeof ch.apiHeaders === 'object' ? ch.apiHeaders : {},
-          sourceHeaders: ch.sourceHeaders && typeof ch.sourceHeaders === 'object' ? ch.sourceHeaders : {},
-          viewCount: 0,
-          order: baseOrder + channelOrderCounter,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-        channelOrderCounter += 1;
-        channelCount += 1;
-      });
-    });
-
-    looseChannels.forEach((ch) => {
-      const channelRef = doc(collection(db, 'channels'));
-      batch.set(channelRef, {
-        categoryId: currentParentId,
-        title: ch.title,
-        subtitle: ch.subtitle || '',
-        status: ch.status || 'live',
-        logoUrl: ch.logoUrl || null,
-        playerChannelKey: ch.playerChannelKey || null,
+    const addItem = (item, categoryId, order, inheritedLogoUrl = null) => {
+      const ref = doc(collection(db, 'channels'));
+      const source = normalizeSource(item);
+      const dataToSave = {
+        categoryId,
+        title: item.title || 'بدون اسم',
+        subtitle: item.subtitle || '',
+        status: item.status || 'live',
+        logoUrl: item.logoUrl || item.thumbnail || item.iconUrl || inheritedLogoUrl || null,
+        playerChannelKey: item.playerChannelKey || null,
+        streamType: source.streamType,
+        sourceUrl: source.protectedValue ? null : source.sourceUrl,
+        apiHeaders: source.apiHeaders,
+        sourceHeaders: source.sourceHeaders,
+        protected: source.protectedValue,
+        directUrl: source.streamType === 'hls' && !source.protectedValue ? source.sourceUrl : null,
         viewCount: 0,
-        order: baseOrder + channelOrderCounter,
+        order,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
-      channelOrderCounter += 1;
-      channelCount += 1;
-    });
+      };
+      operations.push(batch => batch.set(ref, dataToSave));
+      if (source.protectedValue && source.sourceUrl) {
+        privateStreamOperations.push(batch => batch.set(doc(db, 'privateStreams', ref.id), { url: source.sourceUrl, updatedAt: serverTimestamp() }));
+        protectedCount += 1;
+      }
+      itemCount += 1;
+    };
 
-    await batch.commit();
-    bulkFormMessage.classList.remove('error');
-    bulkFormMessage.textContent = `تم استيراد ${categoryCount} قسم و ${channelCount} قناة بنجاح ✓`;
+    const addCategoryTree = (cat, parentId, inheritedType, orderSeed) => {
+      const ref = doc(collection(db, 'categories'));
+      const contentType = ['channels','movies','series','anime'].includes(cat.contentType) ? cat.contentType : inheritedType;
+      operations.push(batch => batch.set(ref, {
+        title: cat.title || 'قسم جديد',
+        iconUrl: cat.iconUrl || cat.image || null,
+        marqueeText: cat.marqueeText || null,
+        isPremium: Boolean(cat.isPremium),
+        parentId: parentId || null,
+        contentType,
+        order: orderSeed,
+        createdAt: serverTimestamp(),
+      }));
+      categoryCount += 1;
+
+      const items = Array.isArray(cat.items) ? cat.items : (Array.isArray(cat.channels) ? cat.channels : []);
+      const inheritedLogoUrl = cat.logoUrl || cat.thumbnail || cat.posterUrl || null;
+      items.forEach((item, i) => {
+        const episodeNumber = item.episodeNumber ?? item.episode ?? item.number;
+        const normalizedItem = { ...item };
+        if (!normalizedItem.title && episodeNumber !== undefined) normalizedItem.title = `الحلقة ${episodeNumber}`;
+        addItem(normalizedItem, ref.id, orderSeed + i, inheritedLogoUrl);
+      });
+
+      const children = Array.isArray(cat.children) ? cat.children : [];
+      children.forEach((child, i) => {
+        if (!child.logoUrl && !child.thumbnail && inheritedLogoUrl) child = { ...child, logoUrl: inheritedLogoUrl };
+        addCategoryTree(child, ref.id, contentType, orderSeed + 1000 + i);
+      });
+    };
+
+    rootCategories.forEach((cat, i) => addCategoryTree(cat, currentParentId, activeContentType, baseOrder + i * 10000));
+    rootItems.forEach((item, i) => addItem(item, currentParentId, baseOrder + i));
+
+    await commitBulkOperations([...operations, ...privateStreamOperations]);
+    bulkFormMessage.textContent = `تم الاستيراد بنجاح ✓ ${categoryCount} قسم و ${itemCount} عنصر${protectedCount ? ` — ${protectedCount} محمي` : ''}`;
     bulkTextarea.value = '';
-    window.setTimeout(async () => {
-      closeAllFormCards();
-      await loadCategories();
-    }, 900);
+    window.setTimeout(async () => { closeAllFormCards(); await loadCategories(); }, 900);
   } catch (error) {
+    console.error(error);
     bulkFormMessage.textContent = 'تعذر تنفيذ الاستيراد. تحقق من قواعد Firestore وصيغة JSON.';
     bulkFormMessage.classList.add('error');
   } finally {

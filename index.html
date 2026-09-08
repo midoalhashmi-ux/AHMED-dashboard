@@ -182,12 +182,12 @@
 
         <section id="bulk-form-card" class="card category-form-card hidden">
           <div>
-            <h2 id="bulk-form-title">استيراد أقسام وقنوات دفعة واحدة</h2>
-            <p class="muted">الصق نص JSON يحتوي على الأقسام (وقنواتها داخل كل قسم اختيارياً)، ثم اضغط استيراد. تُضاف كأقسام فرعية للمكان المفتوح حالياً، أو كأقسام رئيسية إذا كنت في الشاشة الرئيسية.</p>
+            <h2 id="bulk-form-title">استيراد محتوى دفعة واحدة</h2>
+            <p class="muted">أضف الأنمي أو المسلسلات أو الأفلام أو القنوات دفعة واحدة. يدعم التفرعات العمل ← الموسم ← الحلقات، ويحفظ المصدر بكل خصائصه.</p>
           </div>
           <form id="bulk-form" class="marquee-form">
             <label for="bulk-json">نص JSON</label>
-            <textarea id="bulk-json" rows="10" placeholder='{"categories":[{"title":"بي إن سبورت","channels":[{"title":"بي إن سبورت 1","subtitle":"HD"}]}]}'></textarea>
+            <textarea id="bulk-json" rows="12" placeholder="مثال: {"categories":[{"title":"اسم الأنمي","thumbnail":"رابط الصورة","children":[{"title":"الموسم 1","items":[{"episode":1,"sourceUrl":"..."},{"episode":2,"sourceUrl":"..."}]}]}]} — الصورة تنتقل تلقائياً لكل الحلقات ويمكن لكل حلقة مصدرها وخصائصها"></textarea>
             <p id="bulk-form-message" class="form-message" role="status"></p>
             <div class="form-actions">
               <button id="bulk-save-button" type="submit">استيراد</button>
