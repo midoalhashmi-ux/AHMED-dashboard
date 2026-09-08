@@ -83,6 +83,7 @@ const categoriesTitle = document.querySelector('#categories-title');
 const categoriesContext = document.querySelector('#categories-context');
 const categoryFormTitle = document.querySelector('#category-form-title');
 const backToRoot = document.querySelector('#back-to-root');
+const backToHome = document.querySelector('#back-to-home');
 const retryCategories = document.querySelector('#retry-categories');
 const groupButtons = document.querySelectorAll('.nav-group-button[data-group]');
 const subNavs = document.querySelectorAll('[data-group-nav]');
@@ -363,10 +364,12 @@ function renderCurrentCategoryView() {
   if (currentParentId && !parent) currentParentId = null;
   const visibleCategories = currentCategories.filter(
     (category) => (category.parentId || null) === currentParentId,
-  );
+  ).filter(categoryMatchesContentType);
   const isRoot = currentParentId === null;
   const parentTitle = parent?.title || '';
-  categoriesTitle.textContent = isRoot ? 'الأقسام الرئيسية' : `داخل قسم: ${parentTitle}`;
+  const typeNames = { channels: 'القنوات', movies: 'الأفلام', series: 'المسلسلات', anime: 'الأنمي' };
+  const activeTypeName = typeNames[activeContentType] || 'المحتوى';
+  categoriesTitle.textContent = isRoot ? `أقسام ${activeTypeName}` : `داخل قسم: ${parentTitle}`;
   categoriesContext.textContent = isRoot
     ? 'اختر قسماً لعرض ما بداخله، أو أضف عنصراً من زر «+ إضافة».'
     : `كل قسم تضيفه هنا يصبح فرعياً داخل «${parentTitle}».`;
@@ -603,7 +606,7 @@ async function saveChannelSource(channelId) {
     const channel = currentChannels.find((item) => item.id === channelId);
     if (channel) Object.assign(channel, streamType === 'web' || streamType === 'api'
       ? { streamType, sourceUrl: url, protected: false, directUrl: null, sourceHeaders, apiHeaders }
-      : { streamType: 'hls', sourceHeaders, apiHeaders: {} });
+      : { streamType: 'hls', sourceHeaders, apiHeaders: {}, protected: Boolean(protectedToggle?.checked), directUrl: protectedToggle?.checked ? null : url, sourceUrl: null });
   } catch (_) {
     if (status) { status.textContent = 'تعذر الحفظ. تحقق من قواعد Firestore.'; status.classList.add('error'); }
   } finally {
@@ -1190,6 +1193,18 @@ async function deleteCategory(id) {
   }
 }
 
+backToHome.addEventListener('click', () => {
+  currentParentId = null;
+  selectedCategoryIds.clear();
+  categorySelectMode = false;
+  categoriesBulkBar.classList.add('hidden');
+  closeAllFormCards();
+  const homeButton = document.querySelector('.nav-button[data-panel="home-panel"]');
+  document.querySelectorAll('.nav-button[data-panel]').forEach((item) => item.classList.toggle('active', item === homeButton));
+  showPanel('home-panel');
+  renderCurrentCategoryView();
+});
+
 backToRoot.addEventListener('click', () => {
   currentParentId = null;
   selectedCategoryIds.clear();
@@ -1433,6 +1448,17 @@ channelsList.addEventListener('change', (event) => {
       : typeSelect.value === 'api'
         ? 'http://example.com/api/channel/4'
         : 'https://example.com/live/playlist.m3u8';
+    // إبقاء خيار الحماية ظاهراً عند الرجوع إلى HLS أثناء تعديل القناة.
+    const sourceWrap = typeSelect.closest('.channel-source');
+    const existingToggle = sourceWrap?.querySelector('[data-protected-toggle]');
+    if (typeSelect.value === 'hls' && !existingToggle && sourceWrap) {
+      const label = document.createElement('label');
+      label.className = 'protect-toggle';
+      label.innerHTML = `<input type="checkbox" data-protected-toggle="${id}" checked> حماية برابط مؤقت`;
+      typeSelect.insertAdjacentElement('afterend', label);
+    } else if (typeSelect.value !== 'hls' && existingToggle) {
+      existingToggle.closest('.protect-toggle')?.remove();
+    }
     return;
   }
   const input = event.target.closest('[data-reorder-channel]');
