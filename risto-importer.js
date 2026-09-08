@@ -1,3 +1,8 @@
+import {
+  doc,
+  serverTimestamp,
+  writeBatch,
+} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const WORKER_BASE_URL = 'https://binsheikh-api.binsheikh.workers.dev';
 const SYNC_SECRET_STORAGE_KEY = 'binsheikh-admin-sync-secret';
