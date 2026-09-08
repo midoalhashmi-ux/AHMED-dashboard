@@ -3,6 +3,15 @@ const SYNC_SECRET_STORAGE_KEY = 'binsheikh-admin-sync-secret';
 const STATE_KEY = 'ristoAnimeAutoImportStateV1';
 const SOURCE_URL = 'https://ristoanime.me/series/';
 const BATCH_SIZE = 450;
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyAhbhgXXfR7A9AGsDk0c8GCp0bvvhyzw2g',
+  authDomain: 'sports-stream-app-36a7a.firebaseapp.com',
+  projectId: 'sports-stream-app-36a7a',
+  storageBucket: 'sports-stream-app-36a7a.firebasestorage.app',
+  messagingSenderId: '207449859236',
+  appId: '1:207449859236:web:b371a927db431000ceb231',
+  measurementId: 'G-YX8E8NCN8F',
+};
 
 let firebaseReady = false;
 let auth = null;
@@ -18,17 +27,14 @@ function secret() { try { return sessionStorage.getItem(SYNC_SECRET_STORAGE_KEY)
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function ensureFirebase() {
   if (firebaseReady) return;
-  const [{ getApps, getApp, initializeApp }, { getFirestore, collection, doc, writeBatch }, { getAuth }] = await Promise.all([
+  const [{ getApps, getApp, initializeApp }, { getFirestore, doc, writeBatch }, { getAuth }] = await Promise.all([
     import('https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js'),
     import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js'),
     import('https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js')
   ]);
-  const appModule = await import('./app.js');
-  const config = appModule.firebaseConfig;
-  if (!config) throw new Error('تعذر الوصول إلى إعداد Firebase الموجود في لوحة التحكم.');
-  const app = getApps().length ? getApp() : initializeApp(config);
+  const app = getApps().length ? getApp() : initializeApp(FIREBASE_CONFIG);
   db = getFirestore(app); auth = getAuth(app);
-  window.__ristoFirebase = { collection, doc, writeBatch };
+  window.__ristoFirebase = { doc, writeBatch };
   firebaseReady = true;
 }
 function hashId(input) { let h = 2166136261; for (let i=0;i<input.length;i++) { h ^= input.charCodeAt(i); h = Math.imul(h, 16777619); } return `risto_${(h>>>0).toString(16)}_${input.length.toString(36)}`; }
