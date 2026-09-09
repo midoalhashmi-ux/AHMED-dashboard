@@ -272,6 +272,7 @@ function closeAllFormCards() {
   channelFormCard.classList.add('hidden');
   marqueeFormCard.classList.add('hidden');
   bulkFormCard.classList.add('hidden');
+  document.querySelector('#site-import-card')?.classList.add('hidden');
 }
 
 // بعد فتح أي نموذج، انقل الشاشة تلقائياً إلى مكان النموذج بدل إبقائه أعلى الصفحة.
