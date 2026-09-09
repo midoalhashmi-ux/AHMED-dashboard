@@ -23,15 +23,23 @@ let running = false;
 let stopRequested = false;
 let currentState = freshState();
 let currentStateKey = '';
+// معرّفات Firestore (أقسام + حلقات) المكتوبة فعلياً من قبل لهذا الرابط.
+// تبقى محفوظة حتى بعد اكتمال المهمة وبدء دورة جديدة — بها نتخطى إعادة
+// كتابة أي شيء موجود مسبقاً ونكتب فقط ما هو جديد فعلاً (راجع importOneSeries).
+let knownIds = new Set();
 
 function freshState() {
-  return { version: 2, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0, startedAt: null, lastError: '', completed: false };
+  return { version: 3, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0, startedAt: null, lastError: '', completed: false, knownIds: [] };
 }
 function loadState(key) {
   try { return JSON.parse(localStorage.getItem(key) || 'null') || freshState(); }
   catch (_) { return freshState(); }
 }
-function saveState() { if (currentStateKey) localStorage.setItem(currentStateKey, JSON.stringify(currentState)); }
+function saveState() {
+  if (!currentStateKey) return;
+  currentState.knownIds = Array.from(knownIds);
+  localStorage.setItem(currentStateKey, JSON.stringify(currentState));
+}
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function hashId(input) {
@@ -85,7 +93,7 @@ async function commitOperations(ops) {
   for (let i = 0; i < ops.length; i += BATCH_SIZE) {
     if (stopRequested) throw new Error('__STOP__');
     const batch = writeBatch(db);
-    ops.slice(i, i + BATCH_SIZE).forEach(op => op(batch));
+    ops.slice(i, i + BATCH_SIZE).forEach(op => op.run(batch));
     await batch.commit();
     updateProgress(`تم حفظ دفعة ${Math.min(i + BATCH_SIZE, ops.length)} / ${ops.length}`);
     await sleep(20);
@@ -93,30 +101,38 @@ async function commitOperations(ops) {
 }
 
 function categoryOp(id, title, parentId, order, thumbnail, contentType) {
-  return batch => batch.set(doc(db, 'categories', id), {
-    title: title || 'بدون اسم',
-    iconUrl: thumbnail || null,
-    parentId: parentId || null,
-    order: Number.isFinite(order) ? order : 0,
-    isPremium: false,
-    contentType,
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
+  return {
+    id,
+    kind: 'category',
+    run: batch => batch.set(doc(db, 'categories', id), {
+      title: title || 'بدون اسم',
+      iconUrl: thumbnail || null,
+      parentId: parentId || null,
+      order: Number.isFinite(order) ? order : 0,
+      isPremium: false,
+      contentType,
+      updatedAt: serverTimestamp(),
+    }, { merge: true }),
+  };
 }
 function episodeOp(id, categoryId, title, sourceUrl, order, thumbnail) {
-  return batch => batch.set(doc(db, 'channels', id), {
-    categoryId,
-    title: title || 'بدون اسم',
-    logoUrl: thumbnail || null,
-    streamType: 'web',
-    sourceUrl,
-    directUrl: null,
-    protected: false,
-    sourceHeaders: {},
-    apiHeaders: {},
-    order: Number.isFinite(order) ? order : 0,
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
+  return {
+    id,
+    kind: 'episode',
+    run: batch => batch.set(doc(db, 'channels', id), {
+      categoryId,
+      title: title || 'بدون اسم',
+      logoUrl: thumbnail || null,
+      streamType: 'web',
+      sourceUrl,
+      directUrl: null,
+      protected: false,
+      sourceHeaders: {},
+      apiHeaders: {},
+      order: Number.isFinite(order) ? order : 0,
+      updatedAt: serverTimestamp(),
+    }, { merge: true }),
+  };
 }
 
 // نفس مجموعة البطاقات التي يديرها closeAllFormCards() في app.js — تُغلق هنا
@@ -162,7 +178,7 @@ function createUI() {
         <button type="button" id="site-import-reset" class="secondary-button">إعادة ضبط المهمة</button>
         <button type="button" id="site-import-close" class="secondary-button">إغلاق</button>
       </div>
-      <p class="muted" style="margin:0">الإيقاف لا يحذف أي بيانات؛ يمكن استئناف المهمة لاحقاً، والمعرّفات ثابتة لمنع التكرار. لكل رابط مهمة مستقلة، فتغيير الرابط لا يؤثر على تقدّم المهام الأخرى.</p>
+      <p class="muted" style="margin:0">الإيقاف لا يحذف أي بيانات؛ يمكن استئناف المهمة لاحقاً. بعد اكتمال المهمة، ضغط «بدء / استئناف» مرة ثانية (مثلاً بعد يوم) يتحقق من الموقع من جديد لكنه يتخطى كل عمل مستورد سابقاً دون تغيير ويكتب فقط الحلقات الجديدة فعلاً. لكل رابط مهمة مستقلة، فتغيير الرابط لا يؤثر على تقدّم المهام الأخرى.</p>
     </div>`;
   const anchor = document.querySelector('#bulk-form-card') || document.querySelector('#category-form-card');
   anchor?.parentElement?.insertBefore(card, anchor);
@@ -178,8 +194,9 @@ function createUI() {
     if (!isValidHttpUrl(url)) { updateProgress('أدخل رابطاً صالحاً أولاً لإعادة ضبط مهمته.'); return; }
     currentStateKey = stateKeyFor(url);
     currentState = freshState();
+    knownIds = new Set();
     saveState();
-    updateProgress('تمت إعادة ضبط المهمة لهذا الرابط.');
+    updateProgress('تمت إعادة ضبط المهمة لهذا الرابط بالكامل — الاستيراد القادم سيعيد كتابة كل شيء من جديد.');
   });
 
   try {
@@ -190,9 +207,10 @@ function createUI() {
     if (lastUrl) {
       currentStateKey = stateKeyFor(lastUrl);
       currentState = loadState(currentStateKey);
+      knownIds = new Set(currentState.knownIds || []);
     }
   } catch (_) {}
-  updateProgress(currentState.completed ? 'اكتملت آخر مهمة لهذا الرابط.' : (currentState.pages.length ? 'جاهز للاستئناف.' : 'أدخل رابط صفحة القائمة واختر نوع المحتوى، ثم اضغط «بدء / استئناف».'));
+  updateProgress(currentState.completed ? 'اكتملت آخر مهمة لهذا الرابط — اضغط «بدء / استئناف» للتحقق من أي جديد فقط.' : (currentState.pages.length ? 'جاهز للاستئناف.' : 'أدخل رابط صفحة القائمة واختر نوع المحتوى، ثم اضغط «بدء / استئناف».'));
 }
 
 function updateProgress(text) {
@@ -252,8 +270,7 @@ async function importOneSeries(item, index, contentType) {
   const thumbnail = item.thumbnail || collected.thumbnail || null;
   const showId = hashId(`category|${item.url}`);
   const ops = [categoryOp(showId, dataTitle, null, index + 1, thumbnail, contentType)];
-  let categoryCount = 1;
-  let episodeCount = 0;
+  let episodeCount = 0; // عدّاد ترقيم احتياطي فقط لحلقة بلا رقم صريح
 
   const seasonEntries = collected.seasons.length
     ? collected.seasons
@@ -270,7 +287,6 @@ async function importOneSeries(item, index, contentType) {
     const seasonId = hasSeasonName ? hashId(`category|${item.url}|season|${season.url || season.title || si}`) : showId;
     if (hasSeasonName) {
       ops.push(categoryOp(seasonId, season.title || `الموسم ${si + 1}`, showId, si + 1, thumbnail, contentType));
-      categoryCount += 1;
     }
     for (const ep of seasonEpisodes) {
       if (!ep.url) continue;
@@ -281,9 +297,16 @@ async function importOneSeries(item, index, contentType) {
       episodeCount += 1;
     }
   }
-  if (!episodeCount) return { categoryCount, episodeCount: 0 };
-  await commitOperations(ops);
-  return { categoryCount, episodeCount };
+  // تخطّي كل ما سبق كتابته فعلياً — هذا ما يمنع إعادة استهلاك الوقت وحصة
+  // Firestore على أعمال كاملة لم يتغيّر فيها شيء؛ لازم نفتح صفحة العمل
+  // لنعرف هل فيه جديد، لكن ما نكتب إلا الجديد فعلاً.
+  const newOps = ops.filter(op => !knownIds.has(op.id));
+  if (!newOps.length) return { categoryCount: 0, episodeCount: 0 };
+  await commitOperations(newOps);
+  for (const op of newOps) knownIds.add(op.id);
+  const newCategoryCount = newOps.filter(op => op.kind === 'category').length;
+  const newEpisodeCount = newOps.filter(op => op.kind === 'episode').length;
+  return { categoryCount: newCategoryCount, episodeCount: newEpisodeCount };
 }
 
 async function runImport() {
@@ -298,13 +321,18 @@ async function runImport() {
   try { localStorage.setItem(LAST_URL_KEY, url); localStorage.setItem(LAST_TYPE_KEY, contentType); } catch (_) {}
   currentStateKey = stateKeyFor(url);
   currentState = loadState(currentStateKey);
+  knownIds = new Set(currentState.knownIds || []);
   running = true; stopRequested = false;
   currentState.startedAt ||= new Date().toISOString();
   currentState.lastError = '';
   saveState();
   try {
     if (!currentState.pages.length || currentState.completed) {
+      // دورة جديدة (أول مرة، أو بعد اكتمال سابق) — نحتفظ بذاكرة knownIds
+      // عبر الدورات؛ هذا ما يخلي كل عمل مكتمل يُتخطّى فوراً بمجرد ما
+      // نكتشف إنه ما فيه جديد فيه، بدل إعادة كتابته بالكامل كل مرة.
       currentState = freshState();
+      currentState.knownIds = Array.from(knownIds);
       currentState.startedAt = new Date().toISOString();
       currentState.pages = await discoverCatalog(url);
       saveState();
@@ -317,10 +345,10 @@ async function runImport() {
       currentState.doneSeries += 1;
       currentState.seriesIndex += 1;
       saveState();
-      updateProgress(`تم ${currentState.doneSeries}/${currentState.pages.length} — ${currentState.importedEpisodes} حلقة.`);
+      updateProgress(`تم ${currentState.doneSeries}/${currentState.pages.length} — ${currentState.importedEpisodes} حلقة جديدة.`);
     }
     currentState.completed = true; saveState();
-    updateProgress(`اكتمل الاستيراد: ${currentState.importedCategories} قسم و${currentState.importedEpisodes} حلقة. لا توجد بيانات مكررة بسبب المعرّفات الثابتة.`);
+    updateProgress(`اكتمل الفحص: ${currentState.importedCategories} قسم و${currentState.importedEpisodes} حلقة جديدة فعلاً (ما تم تخطيه من المحتوى السابق لم تتم إعادة كتابته).`);
     window.dispatchEvent(new CustomEvent('site-import-complete'));
   } catch (error) {
     if (error?.message === '__STOP__') {
