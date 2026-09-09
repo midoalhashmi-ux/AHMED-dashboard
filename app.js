@@ -742,6 +742,7 @@ async function loadPlayerSettings() {
     document.querySelector('#player-min-version').value = data.minVersion || '';
     document.querySelector('#player-update-url').value = data.updateUrl || '';
     document.querySelector('#player-show-source-page').checked = data.showSourcePage !== false;
+    document.querySelector('#player-diagnostic-log').checked = data.diagnosticLogEnabled === true;
     document.querySelector('#premium-enabled').checked = data.premiumEnabled === true;
     document.querySelector('#premium-url').value = data.premiumUrl || '';
     document.querySelector('#premium-button-text').value = data.premiumButtonText || '';
@@ -1776,6 +1777,7 @@ document.querySelector('#player-form').addEventListener('submit', async (event) 
   const minVersion = document.querySelector('#player-min-version').value.trim();
   const updateUrl = document.querySelector('#player-update-url').value.trim();
   const showSourcePage = document.querySelector('#player-show-source-page').checked;
+  const diagnosticLogEnabled = document.querySelector('#player-diagnostic-log').checked;
   const premiumEnabled = document.querySelector('#premium-enabled').checked;
   const premiumUrl = document.querySelector('#premium-url').value.trim();
   const premiumButtonText = document.querySelector('#premium-button-text').value.trim();
@@ -1787,6 +1789,7 @@ document.querySelector('#player-form').addEventListener('submit', async (event) 
       minVersion,
       updateUrl,
       showSourcePage,
+      diagnosticLogEnabled,
       premiumEnabled,
       premiumUrl,
       premiumButtonText,
