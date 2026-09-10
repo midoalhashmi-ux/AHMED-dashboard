@@ -33,6 +33,14 @@ let currentStateKey = '';
 // كتابة أي شيء موجود مسبقاً ونكتب فقط ما هو جديد فعلاً (راجع importOneSeries).
 let knownIds = new Set();
 
+// حالة نافذة اختيار "القسم الوجهة" — قائمة مسطّحة لكل أقسام نفس نوع
+// المحتوى، ومسار التصفّح الحالي بداخلها (راجع createParentPicker).
+let parentPickerCategories = [];
+let parentPickerContentType = '';
+let parentPickerPath = [];
+let selectedParentId = '';
+let selectedParentLabel = '— بدون (قسم رئيسي مستقل) —';
+
 function freshState() {
   return {
     version: 4, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0,
@@ -209,13 +217,17 @@ function createUI() {
           <option value="channels">📺 قنوات</option>
         </select>
       </label>
-      <label>القسم الوجهة <span class="optional-label">اختياري</span>
-        <span style="display:flex;gap:8px;align-items:center">
-          <select id="site-import-parent" style="flex:1"><option value="">— بدون (قسم رئيسي مستقل) —</option></select>
-          <button type="button" id="site-import-refresh-parents" class="secondary-button" title="تحديث القائمة">🔄</button>
-        </span>
-      </label>
-      <p class="muted" style="margin:0">اتركه فارغاً ليضيف كل عمل كقسم رئيسي مستقل، أو اختر قسماً موجوداً (أنشئه أولاً بزر «+ إضافة» ← «📁 قسم») ليضيف كل الأعمال المستورَدة بداخله — مثلاً أنشئ قسم «تركية» داخل المسلسلات ثم اختره هنا.</p>
+      <label>القسم الوجهة <span class="optional-label">اختياري</span></label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button type="button" id="site-import-parent-toggle" class="secondary-button" style="flex:1;text-align:right">— بدون (قسم رئيسي مستقل) —</button>
+        <button type="button" id="site-import-refresh-parents" class="secondary-button" title="تحديث القائمة">🔄</button>
+      </div>
+      <div id="site-import-parent-panel" class="hidden" style="border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:8px;margin-top:-6px">
+        <input id="site-import-parent-search" type="text" placeholder="ابحث عن قسم بالاسم…" style="width:100%;margin-bottom:8px;box-sizing:border-box" />
+        <div id="site-import-parent-breadcrumb" class="muted" style="margin-bottom:6px;font-size:0.85em"></div>
+        <div id="site-import-parent-list" style="max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+      <p class="muted" style="margin:0">اتركه فارغاً ليضيف كل عمل كقسم رئيسي مستقل، أو تصفّح/ابحث عن أي قسم موجود (بأي مستوى) — أنشئه أولاً بزر «+ إضافة» ← «📁 قسم» لو ما كان موجوداً — ليضيف كل الأعمال المستورَدة بداخله.</p>
       <div id="site-import-progress" class="form-message" role="status">جاهز.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" id="site-import-start">بدء / استئناف</button>
@@ -230,12 +242,19 @@ function createUI() {
 
   const urlInput = card.querySelector('#site-import-url');
   const typeSelect = card.querySelector('#site-import-type');
-  const parentSelect = card.querySelector('#site-import-parent');
   card.querySelector('#site-import-start').addEventListener('click', () => runImport());
   card.querySelector('#site-import-close').addEventListener('click', () => card.classList.add('hidden'));
   card.querySelector('#site-import-stop').addEventListener('click', () => { stopRequested = true; updateProgress('سيتم الإيقاف بعد اكتمال الدفعة الحالية…'); });
-  card.querySelector('#site-import-refresh-parents').addEventListener('click', () => loadParentOptions(parentSelect, typeSelect.value));
-  typeSelect.addEventListener('change', () => loadParentOptions(parentSelect, typeSelect.value));
+  card.querySelector('#site-import-refresh-parents').addEventListener('click', () => refreshParentPicker(typeSelect.value));
+  card.querySelector('#site-import-parent-toggle').addEventListener('click', () => toggleParentPicker(typeSelect.value));
+  card.querySelector('#site-import-parent-search').addEventListener('input', (e) => renderParentPicker(e.target.value));
+  typeSelect.addEventListener('change', () => {
+    selectedParentId = '';
+    selectedParentLabel = '— بدون (قسم رئيسي مستقل) —';
+    updateParentToggleLabel();
+    card.querySelector('#site-import-parent-panel').classList.add('hidden');
+    refreshParentPicker(typeSelect.value);
+  });
   card.querySelector('#site-import-reset').addEventListener('click', () => {
     if (running) return;
     const url = urlInput.value.trim();
@@ -258,35 +277,147 @@ function createUI() {
       knownIds = new Set(currentState.knownIds || []);
     }
   } catch (_) {}
-  loadParentOptions(parentSelect, typeSelect.value);
+  refreshParentPicker(typeSelect.value);
   updateProgress(currentState.completed ? 'اكتملت آخر مهمة لهذا الرابط — اضغط «بدء / استئناف» للتحقق من أي جديد فقط.' : (currentState.pages.length ? 'جاهز للاستئناف.' : 'أدخل رابط صفحة القائمة واختر نوع المحتوى، ثم اضغط «بدء / استئناف».'));
 }
 
-// يعبّئ القسم الوجهة بالأقسام الرئيسية الموجودة فعلياً لنفس نوع المحتوى
-// (مثلاً: أنشئ قسم "تركية" داخل المسلسلات يدوياً، ثم يظهر هنا لتختاره).
-async function loadParentOptions(select, contentType) {
-  const previous = select.value;
-  const lastParent = (() => { try { return localStorage.getItem(LAST_PARENT_KEY) || ''; } catch (_) { return ''; } })();
-  select.innerHTML = '<option value="">— بدون (قسم رئيسي مستقل) —</option>';
-  if (!db) return;
+// نافذة اختيار "القسم الوجهة": تصفّح شجرة الأقسام (مثل اللوحة نفسها) بدل
+// قائمة مسطّحة تخلط كل مئات الأعمال المستوردة سابقاً مع المجلدات الحقيقية،
+// بالإضافة إلى بحث فوري بالاسم بأي مستوى.
+function updateParentToggleLabel() {
+  const btn = document.querySelector('#site-import-parent-toggle');
+  if (btn) btn.textContent = selectedParentLabel;
+}
+function categoryById(id) { return parentPickerCategories.find(c => c.id === id); }
+function childrenOf(parentId) {
+  return parentPickerCategories
+    .filter(c => (c.parentId || null) === (parentId || null))
+    .sort((a, b) => a.title.localeCompare(b.title, 'ar'));
+}
+function breadcrumbLabel(id) {
+  const parts = [];
+  let current = categoryById(id);
+  while (current) { parts.unshift(current.title); current = current.parentId ? categoryById(current.parentId) : null; }
+  return parts.join(' ← ') || '— بدون (قسم رئيسي مستقل) —';
+}
+
+async function refreshParentPicker(contentType) {
+  parentPickerCategories = [];
+  parentPickerContentType = contentType;
+  parentPickerPath = [];
+  if (db) {
+    try {
+      const snap = await getDocs(query(collection(db, 'categories'), where('contentType', '==', contentType)));
+      snap.forEach(d => parentPickerCategories.push({ id: d.id, title: d.data()?.title || d.id, parentId: d.data()?.parentId || null }));
+    } catch (_) { /* أفضل جهد — تبقى القائمة فارغة عند الفشل */ }
+  }
   try {
-    const snap = await getDocs(query(
-      collection(db, 'categories'),
-      where('contentType', '==', contentType),
-      where('parentId', '==', null),
-    ));
-    const items = [];
-    snap.forEach(d => items.push({ id: d.id, title: d.data()?.title || d.id }));
-    items.sort((a, b) => a.title.localeCompare(b.title, 'ar'));
-    for (const item of items) {
-      const opt = document.createElement('option');
-      opt.value = item.id;
-      opt.textContent = item.title;
-      select.appendChild(opt);
+    const lastParent = localStorage.getItem(LAST_PARENT_KEY) || '';
+    if (lastParent && !selectedParentId && categoryById(lastParent)) {
+      selectedParentId = lastParent;
+      selectedParentLabel = breadcrumbLabel(lastParent);
+      updateParentToggleLabel();
     }
-    const restore = items.some(i => i.id === previous) ? previous : (items.some(i => i.id === lastParent) ? lastParent : '');
-    select.value = restore;
-  } catch (_) { /* أفضل جهد — يبقى الخيار الافتراضي فقط عند الفشل */ }
+  } catch (_) {}
+  const panel = document.querySelector('#site-import-parent-panel');
+  if (panel && !panel.classList.contains('hidden')) renderParentPicker(document.querySelector('#site-import-parent-search')?.value || '');
+}
+
+function toggleParentPicker(contentType) {
+  const panel = document.querySelector('#site-import-parent-panel');
+  if (!panel) return;
+  const willOpen = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !willOpen);
+  if (!willOpen) return;
+  const search = document.querySelector('#site-import-parent-search');
+  if (search) search.value = '';
+  if (parentPickerContentType !== contentType) refreshParentPicker(contentType).then(() => renderParentPicker(''));
+  else renderParentPicker('');
+  if (search) setTimeout(() => search.focus(), 50);
+}
+
+function selectParent(id) {
+  selectedParentId = id || '';
+  selectedParentLabel = id ? breadcrumbLabel(id) : '— بدون (قسم رئيسي مستقل) —';
+  updateParentToggleLabel();
+  try { localStorage.setItem(LAST_PARENT_KEY, selectedParentId); } catch (_) {}
+  document.querySelector('#site-import-parent-panel')?.classList.add('hidden');
+}
+
+function renderParentPicker(searchValue) {
+  const list = document.querySelector('#site-import-parent-list');
+  const breadcrumbEl = document.querySelector('#site-import-parent-breadcrumb');
+  if (!list || !breadcrumbEl) return;
+  list.innerHTML = '';
+
+  const addRow = (label, onSelect, { hasChildren = false, onEnter = null } = {}) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center';
+    const selectButton = document.createElement('button');
+    selectButton.type = 'button';
+    selectButton.className = 'secondary-button';
+    selectButton.style.cssText = 'flex:1;text-align:right';
+    selectButton.textContent = label;
+    selectButton.addEventListener('click', onSelect);
+    row.appendChild(selectButton);
+    if (hasChildren) {
+      const enterButton = document.createElement('button');
+      enterButton.type = 'button';
+      enterButton.className = 'secondary-button';
+      enterButton.title = 'فتح هذا القسم لعرض ما بداخله';
+      enterButton.textContent = '◂ فتح';
+      enterButton.addEventListener('click', onEnter);
+      row.appendChild(enterButton);
+    }
+    list.appendChild(row);
+  };
+
+  const trimmed = (searchValue || '').trim();
+  if (trimmed) {
+    breadcrumbEl.textContent = `نتائج البحث عن «${trimmed}»`;
+    const lower = trimmed.toLowerCase();
+    const matches = parentPickerCategories.filter(c => c.title.toLowerCase().includes(lower)).slice(0, 60);
+    if (!matches.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.style.margin = '4px 0';
+      empty.textContent = 'لا نتائج.';
+      list.appendChild(empty);
+      return;
+    }
+    for (const cat of matches) addRow(breadcrumbLabel(cat.id), () => selectParent(cat.id));
+    return;
+  }
+
+  breadcrumbEl.innerHTML = '';
+  const crumbs = ['الجذر', ...parentPickerPath.map(id => categoryById(id)?.title || id)];
+  crumbs.forEach((label, i) => {
+    const a = document.createElement('a');
+    a.href = '#';
+    a.textContent = label;
+    a.style.cssText = 'color:inherit;text-decoration:underline;cursor:pointer';
+    a.addEventListener('click', (e) => { e.preventDefault(); parentPickerPath = parentPickerPath.slice(0, i); renderParentPicker(''); });
+    breadcrumbEl.appendChild(a);
+    if (i < crumbs.length - 1) breadcrumbEl.appendChild(document.createTextNode('  ←  '));
+  });
+
+  if (!parentPickerPath.length) addRow('— بدون (قسم رئيسي مستقل) —', () => selectParent(''));
+  const currentParentId = parentPickerPath.length ? parentPickerPath[parentPickerPath.length - 1] : null;
+  const items = childrenOf(currentParentId);
+  if (!items.length) {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.style.margin = '4px 0';
+    empty.textContent = 'لا توجد أقسام فرعية هنا.';
+    list.appendChild(empty);
+  }
+  for (const cat of items) {
+    const hasChildren = childrenOf(cat.id).length > 0;
+    addRow(cat.title, () => selectParent(cat.id), {
+      hasChildren,
+      onEnter: (e) => { e.stopPropagation(); parentPickerPath = [...parentPickerPath, cat.id]; renderParentPicker(''); },
+    });
+  }
 }
 
 function updateProgress(text) {
@@ -300,8 +431,7 @@ function openImporter() {
   card.classList.remove('hidden');
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const typeSelect = card.querySelector('#site-import-type');
-  const parentSelect = card.querySelector('#site-import-parent');
-  if (typeSelect && parentSelect) loadParentOptions(parentSelect, typeSelect.value);
+  if (typeSelect) refreshParentPicker(typeSelect.value);
 }
 
 async function discoverCatalog(startUrl) {
@@ -396,7 +526,7 @@ async function runImport() {
   const card = document.querySelector('#site-import-card');
   const url = card.querySelector('#site-import-url').value.trim();
   const contentType = card.querySelector('#site-import-type').value;
-  const parentCategoryId = card.querySelector('#site-import-parent').value || '';
+  const parentCategoryId = selectedParentId || '';
   if (!isValidHttpUrl(url)) { updateProgress('أدخل رابط صفحة القائمة أولاً (يبدأ بـ http:// أو https://).'); return; }
   if (!firebaseReady || !auth || !db) { updateProgress('تعذر الاتصال بخدمة لوحة التحكم. أعد تحميل الصفحة وحاول مرة أخرى.'); return; }
   if (!auth.currentUser) { updateProgress('سجّل الدخول إلى لوحة التحكم أولاً.'); return; }
