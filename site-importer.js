@@ -29,7 +29,14 @@ let currentStateKey = '';
 let knownIds = new Set();
 
 function freshState() {
-  return { version: 3, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0, startedAt: null, lastError: '', completed: false, knownIds: [] };
+  return {
+    version: 4, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0,
+    startedAt: null, lastError: '', completed: false, knownIds: [],
+    // بعض المواقع تعرض صفحة "معلومات الحلقة" بدون أي مصدر تشغيل، والمشاهدة
+    // الفعلية بنفس الرابط + مقطع إضافي (مثلاً ".../watch/") — يُكتشف مرة
+    // واحدة فقط من أول حلقة (انظر ensureWatchSuffix) ويُطبَّق على الباقي.
+    watchSuffixChecked: false, watchSuffix: '',
+  };
 }
 function loadState(key) {
   try { return JSON.parse(localStorage.getItem(key) || 'null') || freshState(); }
@@ -87,6 +94,32 @@ async function worker(path, body) {
   }
   if (!response.ok) throw new Error(data.message || data.error || `Worker HTTP ${response.status}`);
   return data;
+}
+
+// يُستدعى مرة واحدة فقط لكل رابط (يُحفظ بالحالة) — يفتح حلقة واحدة فعلية
+// ليكتشف هل رابط الحلقة المباشر يشتغل كمصدر تشغيل، أو إنه صفحة "معلومات"
+// فقط والمشاهدة الحقيقية بنفس الرابط + مقطع إضافي (مثال: RistoAnime يحتاج
+// "/watch/" إضافية). إن اكتُشف مقطع، يُطبَّق على كل حلقات هذا الموقع بدون
+// فتح كل حلقة على حدة.
+async function ensureWatchSuffix(sampleUrl) {
+  if (currentState.watchSuffixChecked) return;
+  currentState.watchSuffixChecked = true;
+  currentState.watchSuffix = '';
+  if (sampleUrl) {
+    try {
+      const data = await worker('/import/site', { action: 'resolveEpisode', url: sampleUrl });
+      const watchUrl = data && data.watchUrl;
+      const base = sampleUrl.replace(/\/$/, '');
+      if (watchUrl && watchUrl !== base && watchUrl.startsWith(base)) {
+        currentState.watchSuffix = watchUrl.slice(base.length);
+      }
+    } catch (_) { /* أفضل جهد — نبقي روابط الحلقات المباشرة عند الفشل */ }
+  }
+  saveState();
+}
+function applyWatchSuffix(url) {
+  if (!url) return url;
+  return currentState.watchSuffix ? `${url.replace(/\/$/, '')}${currentState.watchSuffix}` : url;
 }
 
 async function commitOperations(ops) {
@@ -288,12 +321,13 @@ async function importOneSeries(item, index, contentType) {
     if (hasSeasonName) {
       ops.push(categoryOp(seasonId, season.title || `الموسم ${si + 1}`, showId, si + 1, thumbnail, contentType));
     }
+    if (seasonEpisodes.length) await ensureWatchSuffix(seasonEpisodes[0].url);
     for (const ep of seasonEpisodes) {
       if (!ep.url) continue;
       const n = Number.isFinite(ep.episodeNumber) ? ep.episodeNumber : episodeCount + 1;
       const title = ep.title || `${dataTitle} - الحلقة ${n}`;
       const id = hashId(`episode|${seasonId}|${ep.url}`);
-      ops.push(episodeOp(id, seasonId, title, ep.url, n, ep.thumbnail || thumbnail));
+      ops.push(episodeOp(id, seasonId, title, applyWatchSuffix(ep.url), n, ep.thumbnail || thumbnail));
       episodeCount += 1;
     }
   }
@@ -329,10 +363,15 @@ async function runImport() {
   try {
     if (!currentState.pages.length || currentState.completed) {
       // دورة جديدة (أول مرة، أو بعد اكتمال سابق) — نحتفظ بذاكرة knownIds
-      // عبر الدورات؛ هذا ما يخلي كل عمل مكتمل يُتخطّى فوراً بمجرد ما
-      // نكتشف إنه ما فيه جديد فيه، بدل إعادة كتابته بالكامل كل مرة.
+      // وbwatchSuffix عبر الدورات؛ هذا ما يخلي كل عمل مكتمل يُتخطّى فوراً
+      // بمجرد ما نكتشف إنه ما فيه جديد فيه، بدل إعادة كتابته بالكامل كل
+      // مرة، ويمنع إعادة اكتشاف مقطع "watch" من الصفر كل دورة.
+      const preservedWatchChecked = currentState.watchSuffixChecked;
+      const preservedWatchSuffix = currentState.watchSuffix;
       currentState = freshState();
       currentState.knownIds = Array.from(knownIds);
+      currentState.watchSuffixChecked = preservedWatchChecked || false;
+      currentState.watchSuffix = preservedWatchSuffix || '';
       currentState.startedAt = new Date().toISOString();
       currentState.pages = await discoverCatalog(url);
       saveState();
