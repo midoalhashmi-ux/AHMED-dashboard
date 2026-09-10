@@ -2,6 +2,10 @@ import {
   doc,
   serverTimestamp,
   writeBatch,
+  collection,
+  query,
+  where,
+  getDocs,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const WORKER_BASE_URL = 'https://binsheikh-api.binsheikh.workers.dev';
@@ -9,6 +13,7 @@ const SYNC_SECRET_STORAGE_KEY = 'binsheikh-admin-sync-secret';
 const STATE_PREFIX = 'siteAutoImportStateV2:';
 const LAST_URL_KEY = 'siteAutoImportLastUrl';
 const LAST_TYPE_KEY = 'siteAutoImportLastType';
+const LAST_PARENT_KEY = 'siteAutoImportLastParent';
 const BATCH_SIZE = 450;
 const PAGE_LIMIT = 1000;
 
@@ -204,6 +209,13 @@ function createUI() {
           <option value="channels">📺 قنوات</option>
         </select>
       </label>
+      <label>القسم الوجهة <span class="optional-label">اختياري</span>
+        <span style="display:flex;gap:8px;align-items:center">
+          <select id="site-import-parent" style="flex:1"><option value="">— بدون (قسم رئيسي مستقل) —</option></select>
+          <button type="button" id="site-import-refresh-parents" class="secondary-button" title="تحديث القائمة">🔄</button>
+        </span>
+      </label>
+      <p class="muted" style="margin:0">اتركه فارغاً ليضيف كل عمل كقسم رئيسي مستقل، أو اختر قسماً موجوداً (أنشئه أولاً بزر «+ إضافة» ← «📁 قسم») ليضيف كل الأعمال المستورَدة بداخله — مثلاً أنشئ قسم «تركية» داخل المسلسلات ثم اختره هنا.</p>
       <div id="site-import-progress" class="form-message" role="status">جاهز.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" id="site-import-start">بدء / استئناف</button>
@@ -218,9 +230,12 @@ function createUI() {
 
   const urlInput = card.querySelector('#site-import-url');
   const typeSelect = card.querySelector('#site-import-type');
+  const parentSelect = card.querySelector('#site-import-parent');
   card.querySelector('#site-import-start').addEventListener('click', () => runImport());
   card.querySelector('#site-import-close').addEventListener('click', () => card.classList.add('hidden'));
   card.querySelector('#site-import-stop').addEventListener('click', () => { stopRequested = true; updateProgress('سيتم الإيقاف بعد اكتمال الدفعة الحالية…'); });
+  card.querySelector('#site-import-refresh-parents').addEventListener('click', () => loadParentOptions(parentSelect, typeSelect.value));
+  typeSelect.addEventListener('change', () => loadParentOptions(parentSelect, typeSelect.value));
   card.querySelector('#site-import-reset').addEventListener('click', () => {
     if (running) return;
     const url = urlInput.value.trim();
@@ -243,7 +258,35 @@ function createUI() {
       knownIds = new Set(currentState.knownIds || []);
     }
   } catch (_) {}
+  loadParentOptions(parentSelect, typeSelect.value);
   updateProgress(currentState.completed ? 'اكتملت آخر مهمة لهذا الرابط — اضغط «بدء / استئناف» للتحقق من أي جديد فقط.' : (currentState.pages.length ? 'جاهز للاستئناف.' : 'أدخل رابط صفحة القائمة واختر نوع المحتوى، ثم اضغط «بدء / استئناف».'));
+}
+
+// يعبّئ القسم الوجهة بالأقسام الرئيسية الموجودة فعلياً لنفس نوع المحتوى
+// (مثلاً: أنشئ قسم "تركية" داخل المسلسلات يدوياً، ثم يظهر هنا لتختاره).
+async function loadParentOptions(select, contentType) {
+  const previous = select.value;
+  const lastParent = (() => { try { return localStorage.getItem(LAST_PARENT_KEY) || ''; } catch (_) { return ''; } })();
+  select.innerHTML = '<option value="">— بدون (قسم رئيسي مستقل) —</option>';
+  if (!db) return;
+  try {
+    const snap = await getDocs(query(
+      collection(db, 'categories'),
+      where('contentType', '==', contentType),
+      where('parentId', '==', null),
+    ));
+    const items = [];
+    snap.forEach(d => items.push({ id: d.id, title: d.data()?.title || d.id }));
+    items.sort((a, b) => a.title.localeCompare(b.title, 'ar'));
+    for (const item of items) {
+      const opt = document.createElement('option');
+      opt.value = item.id;
+      opt.textContent = item.title;
+      select.appendChild(opt);
+    }
+    const restore = items.some(i => i.id === previous) ? previous : (items.some(i => i.id === lastParent) ? lastParent : '');
+    select.value = restore;
+  } catch (_) { /* أفضل جهد — يبقى الخيار الافتراضي فقط عند الفشل */ }
 }
 
 function updateProgress(text) {
@@ -256,6 +299,9 @@ function openImporter() {
   OTHER_FORM_CARD_SELECTORS.forEach(sel => document.querySelector(sel)?.classList.add('hidden'));
   card.classList.remove('hidden');
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const typeSelect = card.querySelector('#site-import-type');
+  const parentSelect = card.querySelector('#site-import-parent');
+  if (typeSelect && parentSelect) loadParentOptions(parentSelect, typeSelect.value);
 }
 
 async function discoverCatalog(startUrl) {
@@ -296,7 +342,7 @@ async function collectSeriesData(item) {
   return { title, thumbnail, episodes, seasons };
 }
 
-async function importOneSeries(item, index, contentType) {
+async function importOneSeries(item, index, contentType, parentCategoryId) {
   updateProgress(`(${index + 1}/${currentState.pages.length}) ${item.title || 'عنصر'} — قراءة المواسم والحلقات…`);
   const collected = await collectSeriesData(item);
   // عنوان بطاقة القائمة أنظف من عنوان صفحة العمل نفسها في الغالب — صفحة
@@ -304,7 +350,7 @@ async function importOneSeries(item, index, contentType) {
   const dataTitle = item.title || collected.title || 'بدون اسم';
   const thumbnail = item.thumbnail || collected.thumbnail || null;
   const showId = hashId(`category|${item.url}`);
-  const ops = [categoryOp(showId, dataTitle, null, index + 1, thumbnail, contentType)];
+  const ops = [categoryOp(showId, dataTitle, parentCategoryId || null, index + 1, thumbnail, contentType)];
   let episodeCount = 0; // عدّاد ترقيم احتياطي فقط لحلقة بلا رقم صريح
 
   const seasonEntries = collected.seasons.length
@@ -350,11 +396,16 @@ async function runImport() {
   const card = document.querySelector('#site-import-card');
   const url = card.querySelector('#site-import-url').value.trim();
   const contentType = card.querySelector('#site-import-type').value;
+  const parentCategoryId = card.querySelector('#site-import-parent').value || '';
   if (!isValidHttpUrl(url)) { updateProgress('أدخل رابط صفحة القائمة أولاً (يبدأ بـ http:// أو https://).'); return; }
   if (!firebaseReady || !auth || !db) { updateProgress('تعذر الاتصال بخدمة لوحة التحكم. أعد تحميل الصفحة وحاول مرة أخرى.'); return; }
   if (!auth.currentUser) { updateProgress('سجّل الدخول إلى لوحة التحكم أولاً.'); return; }
 
-  try { localStorage.setItem(LAST_URL_KEY, url); localStorage.setItem(LAST_TYPE_KEY, contentType); } catch (_) {}
+  try {
+    localStorage.setItem(LAST_URL_KEY, url);
+    localStorage.setItem(LAST_TYPE_KEY, contentType);
+    localStorage.setItem(LAST_PARENT_KEY, parentCategoryId);
+  } catch (_) {}
   currentStateKey = stateKeyFor(url);
   currentState = loadState(currentStateKey);
   knownIds = new Set(currentState.knownIds || []);
@@ -380,7 +431,7 @@ async function runImport() {
     }
     while (currentState.seriesIndex < currentState.pages.length) {
       if (stopRequested) throw new Error('__STOP__');
-      const result = await importOneSeries(currentState.pages[currentState.seriesIndex], currentState.seriesIndex, contentType);
+      const result = await importOneSeries(currentState.pages[currentState.seriesIndex], currentState.seriesIndex, contentType, parentCategoryId);
       currentState.importedCategories += result.categoryCount;
       currentState.importedEpisodes += result.episodeCount;
       currentState.doneSeries += 1;
