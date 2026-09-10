@@ -382,11 +382,24 @@
               <ol id="stats-channels-list" class="stats-list hidden"></ol>
             </section>
           </div>
+
+          <section class="card" style="margin-top:16px">
+            <h2>تقييمات الأفلام والمسلسلات والأنمي</h2>
+            <p class="muted" style="margin-top:-6px">
+              يجلب نسبة التقييم تلقائياً لكل قسم (أفلام/مسلسلات من TMDB، أنمي من MyAnimeList) بمطابقة العنوان.
+              أي قسم لا يوجد له تطابق واضح يبقى بدون تقييم بدل تخمين رقم خاطئ.
+            </p>
+            <div class="section-actions" style="margin-top:10px">
+              <button id="ratings-update-button" class="secondary-button" type="button">🎯 تحديث كل التقييمات</button>
+              <span id="ratings-progress" class="muted"></span>
+            </div>
+          </section>
         </section>
       </section>
     </main>
 
     <script type="module" src="app.js"></script>
     <script type="module" src="site-importer.js"></script>
+    <script type="module" src="ratings.js"></script>
   </body>
 </html>
