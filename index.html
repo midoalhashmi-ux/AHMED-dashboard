@@ -41,6 +41,7 @@
           <button class="nav-group-button active" type="button" data-group="app">📱 التطبيق</button>
           <button class="nav-group-button" type="button" data-group="player">▶️ المشغل</button>
           <button class="nav-group-button" type="button" data-group="ads">📢 الإعلانات</button>
+          <button class="nav-group-button" type="button" data-group="stats">📊 الإحصائيات</button>
         </nav>
 
         <nav class="admin-nav sub-nav" data-group-nav="app" aria-label="أقسام التطبيق">
@@ -350,6 +351,37 @@
             <div><label for="premium-url">رابط الاشتراك</label><input id="premium-url" type="url" placeholder="https://your-site.com/subscribe" /></div>
             <div><label for="premium-button-text">نص الزر</label><input id="premium-button-text" maxlength="40" placeholder="الاشتراك المميز" /></div>
             <p id="player-message" class="form-message"></p><button type="submit">حفظ إعدادات المشغل</button></form></section>
+        </section>
+
+        <section id="stats-panel" class="admin-panel hidden" data-group="stats">
+          <section class="section-heading">
+            <div>
+              <p class="eyebrow">تحليلات الاستخدام</p>
+              <h2>الأكثر مشاهدة</h2>
+              <p class="muted">عدّاد يزداد في كل مرة يفتح فيها مستخدم حلقة/قناة أو مسلسلاً/أنمي من تطبيق المحتوى. يُحدَّث لحظياً.</p>
+            </div>
+            <div class="section-actions">
+              <button id="stats-refresh" class="secondary-button" type="button">تحديث</button>
+            </div>
+          </section>
+
+          <div class="stats-grid">
+            <section class="card">
+              <h2>الأكثر مشاهدة — المسلسلات والأنمي والأفلام (أقسام)</h2>
+              <p class="muted" style="margin-top:-6px">مجموع مشاهدات كل حلقات المسلسل/الأنمي، على مستوى القسم كاملاً.</p>
+              <div id="stats-categories-loading" class="loading-card"><span class="spinner"></span><p>جارٍ التحميل…</p></div>
+              <p id="stats-categories-empty" class="muted hidden">لا توجد مشاهدات مسجّلة بعد.</p>
+              <ol id="stats-categories-list" class="stats-list hidden"></ol>
+            </section>
+
+            <section class="card">
+              <h2>الأكثر مشاهدة — القنوات والحلقات (فردياً)</h2>
+              <p class="muted" style="margin-top:-6px">كل حلقة/قناة بمفردها، بغض النظر عن القسم.</p>
+              <div id="stats-channels-loading" class="loading-card"><span class="spinner"></span><p>جارٍ التحميل…</p></div>
+              <p id="stats-channels-empty" class="muted hidden">لا توجد مشاهدات مسجّلة بعد.</p>
+              <ol id="stats-channels-list" class="stats-list hidden"></ol>
+            </section>
+          </div>
         </section>
       </section>
     </main>

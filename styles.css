@@ -499,6 +499,24 @@ form button { width: 100%; margin-top: 14px; }
 
 /* ------------------------- الخطوة التالية ------------------------- */
 .next-step { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 22px; padding: 18px 22px; }
+
+/* ------------------------- الإحصائيات ------------------------- */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.stats-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
+.stats-list-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.stats-list-rank {
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft);
+  color: var(--accent); font-size: 0.78rem; font-weight: 800;
+}
+.stats-list-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-list-count { flex-shrink: 0; color: var(--accent); font-weight: 800; font-size: 0.9rem; }
+@media (max-width: 860px) {
+  .stats-grid { grid-template-columns: 1fr; }
+}
 .next-step span { color: var(--accent); font-size: 0.86rem; font-weight: 700; }
 .next-step p { margin: 0; color: var(--text); }
 

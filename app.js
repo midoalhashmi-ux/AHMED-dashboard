@@ -223,6 +223,15 @@ const messagesCount = document.querySelector('#messages-count');
 const messagesBadge = document.querySelector('#messages-badge');
 let currentMessages = [];
 
+// ---- الإحصائيات (الأكثر مشاهدة) ----
+const statsRefreshButton = document.querySelector('#stats-refresh');
+const statsCategoriesLoading = document.querySelector('#stats-categories-loading');
+const statsCategoriesEmpty = document.querySelector('#stats-categories-empty');
+const statsCategoriesList = document.querySelector('#stats-categories-list');
+const statsChannelsLoading = document.querySelector('#stats-channels-loading');
+const statsChannelsEmpty = document.querySelector('#stats-channels-empty');
+const statsChannelsList = document.querySelector('#stats-channels-list');
+
 // ---- الشروط والأحكام / سياسة الخصوصية ----
 const legalForm = document.querySelector('#legal-form');
 const legalTerms = document.querySelector('#legal-terms');
@@ -883,6 +892,67 @@ syncWindowButton?.addEventListener('click', () => runMatchesSync(
 ));
 
 // ==========================================================================
+// الإحصائيات — الأكثر مشاهدة (عدّاد viewCount يزداد من تطبيق المحتوى في كل
+// مرة يفتح فيها مستخدم حلقة/قناة، راجع firestore.rules لقاعدة الأمان
+// الضيّقة التي تسمح بهذه الزيادة فقط دون أي حقل آخر).
+// ==========================================================================
+function renderStatsList(listEl, emptyEl, items) {
+  if (!items.length) {
+    listEl.classList.add('hidden');
+    emptyEl.classList.remove('hidden');
+    return;
+  }
+  emptyEl.classList.add('hidden');
+  listEl.classList.remove('hidden');
+  listEl.innerHTML = items.map((item, index) => `
+    <li class="stats-list-item">
+      <span class="stats-list-rank">${index + 1}</span>
+      <span class="stats-list-title">${escapeHtml(item.title || 'بدون اسم')}</span>
+      <span class="stats-list-count">${item.viewCount.toLocaleString('ar')} مشاهدة</span>
+    </li>
+  `).join('');
+}
+
+async function loadStats() {
+  statsCategoriesLoading.classList.remove('hidden');
+  statsCategoriesEmpty.classList.add('hidden');
+  statsCategoriesList.classList.add('hidden');
+  statsChannelsLoading.classList.remove('hidden');
+  statsChannelsEmpty.classList.add('hidden');
+  statsChannelsList.classList.add('hidden');
+
+  try {
+    const categoriesQuery = query(collection(db, 'categories'), orderBy('viewCount', 'desc'), limit(20));
+    const snapshot = await getDocs(categoriesQuery);
+    const items = snapshot.docs
+      .map((item) => ({ title: item.data().title, viewCount: item.data().viewCount || 0 }))
+      .filter((item) => item.viewCount > 0);
+    statsCategoriesLoading.classList.add('hidden');
+    renderStatsList(statsCategoriesList, statsCategoriesEmpty, items);
+  } catch (_) {
+    statsCategoriesLoading.classList.add('hidden');
+    statsCategoriesEmpty.textContent = 'تعذر تحميل إحصائيات الأقسام.';
+    statsCategoriesEmpty.classList.remove('hidden');
+  }
+
+  try {
+    const channelsQuery = query(collection(db, 'channels'), orderBy('viewCount', 'desc'), limit(20));
+    const snapshot = await getDocs(channelsQuery);
+    const items = snapshot.docs
+      .map((item) => ({ title: item.data().title, viewCount: item.data().viewCount || 0 }))
+      .filter((item) => item.viewCount > 0);
+    statsChannelsLoading.classList.add('hidden');
+    renderStatsList(statsChannelsList, statsChannelsEmpty, items);
+  } catch (_) {
+    statsChannelsLoading.classList.add('hidden');
+    statsChannelsEmpty.textContent = 'تعذر تحميل إحصائيات القنوات.';
+    statsChannelsEmpty.classList.remove('hidden');
+  }
+}
+
+statsRefreshButton.addEventListener('click', loadStats);
+
+// ==========================================================================
 // الرسائل الواردة (contactMessages) — تواصل معنا / إبلاغ عن رابط معطوب
 // ==========================================================================
 const MESSAGE_TYPE_LABELS = { general: 'تواصل معنا', broken_link: 'رابط معطوب' };
@@ -1060,6 +1130,7 @@ onAuthStateChanged(auth, (user) => {
     loadMessages();
     loadLegalSettings();
     loadAdsSettings();
+    loadStats();
     return;
   }
   showView('login');
