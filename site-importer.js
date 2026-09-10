@@ -43,12 +43,16 @@ let selectedParentLabel = '— بدون (قسم رئيسي مستقل) —';
 
 function freshState() {
   return {
-    version: 4, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0,
+    version: 5, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0,
     startedAt: null, lastError: '', completed: false, knownIds: [],
     // بعض المواقع تعرض صفحة "معلومات الحلقة" بدون أي مصدر تشغيل، والمشاهدة
-    // الفعلية بنفس الرابط + مقطع إضافي (مثلاً ".../watch/") — يُكتشف مرة
-    // واحدة فقط من أول حلقة (انظر ensureWatchSuffix) ويُطبَّق على الباقي.
-    watchSuffixChecked: false, watchSuffix: '',
+    // الفعلية بنفس الرابط + مقطع إضافي (مثلاً ".../see/"). يُكتشف مرة واحدة
+    // فقط من أول حلقة **لكل عمل (مسلسل/أنمي) على حدة** ويُطبَّق على باقي
+    // حلقاته هو فقط — راجع ensureWatchSuffix. كان يُكتشف مرة واحدة للموقع
+    // كاملاً (مسلسل → بيانات → مسلسل → ...) فيطبَّق خطأً على أعمال أخرى
+    // بنفس الموقع لها نمط رابط مختلف، فتُستورد بعض حلقاتها برابط صفحة
+    // المعلومات بدل رابط المشاهدة الحقيقي.
+    watchSuffixCache: {},
   };
 }
 function loadState(key) {
@@ -109,30 +113,34 @@ async function worker(path, body) {
   return data;
 }
 
-// يُستدعى مرة واحدة فقط لكل رابط (يُحفظ بالحالة) — يفتح حلقة واحدة فعلية
+// يُستدعى مرة واحدة فقط لكل عمل (seriesKey — رابط صفحة المسلسل/الأنمي
+// نفسه، وليس الموقع كاملاً) — يفتح حلقة واحدة فعلية من هذا العمل تحديداً
 // ليكتشف هل رابط الحلقة المباشر يشتغل كمصدر تشغيل، أو إنه صفحة "معلومات"
 // فقط والمشاهدة الحقيقية بنفس الرابط + مقطع إضافي (مثال: RistoAnime يحتاج
-// "/watch/" إضافية). إن اكتُشف مقطع، يُطبَّق على كل حلقات هذا الموقع بدون
-// فتح كل حلقة على حدة.
-async function ensureWatchSuffix(sampleUrl) {
-  if (currentState.watchSuffixChecked) return;
-  currentState.watchSuffixChecked = true;
-  currentState.watchSuffix = '';
+// "/watch/" إضافية). النتيجة تُخزَّن بالحالة لهذا العمل تحديداً وتُطبَّق
+// على كل حلقاته هو فقط — مواقع فيها أعمال بأنماط روابط مختلفة (بعضها
+// يحتاج المقطع الإضافي وبعضها لا) كانت تفشل مع اكتشاف عام لموقع كامل.
+async function ensureWatchSuffix(seriesKey, sampleUrl) {
+  const cache = currentState.watchSuffixCache || (currentState.watchSuffixCache = {});
+  if (Object.prototype.hasOwnProperty.call(cache, seriesKey)) return cache[seriesKey];
+  let suffix = '';
   if (sampleUrl) {
     try {
       const data = await worker('/import/site', { action: 'resolveEpisode', url: sampleUrl });
       const watchUrl = data && data.watchUrl;
       const base = sampleUrl.replace(/\/$/, '');
       if (watchUrl && watchUrl !== base && watchUrl.startsWith(base)) {
-        currentState.watchSuffix = watchUrl.slice(base.length);
+        suffix = watchUrl.slice(base.length);
       }
     } catch (_) { /* أفضل جهد — نبقي روابط الحلقات المباشرة عند الفشل */ }
   }
+  cache[seriesKey] = suffix;
   saveState();
+  return suffix;
 }
-function applyWatchSuffix(url) {
+function applyWatchSuffix(url, suffix) {
   if (!url) return url;
-  return currentState.watchSuffix ? `${url.replace(/\/$/, '')}${currentState.watchSuffix}` : url;
+  return suffix ? `${url.replace(/\/$/, '')}${suffix}` : url;
 }
 
 async function commitOperations(ops) {
@@ -499,13 +507,15 @@ async function importOneSeries(item, index, contentType, parentCategoryId) {
     if (hasSeasonName) {
       ops.push(categoryOp(seasonId, season.title || `الموسم ${si + 1}`, showId, si + 1, thumbnail, contentType));
     }
-    if (seasonEpisodes.length) await ensureWatchSuffix(seasonEpisodes[0].url);
+    const watchSuffix = seasonEpisodes.length
+      ? await ensureWatchSuffix(item.url, seasonEpisodes[0].url)
+      : '';
     for (const ep of seasonEpisodes) {
       if (!ep.url) continue;
       const n = Number.isFinite(ep.episodeNumber) ? ep.episodeNumber : episodeCount + 1;
       const title = ep.title || `${dataTitle} - الحلقة ${n}`;
       const id = hashId(`episode|${seasonId}|${ep.url}`);
-      ops.push(episodeOp(id, seasonId, title, applyWatchSuffix(ep.url), n, ep.thumbnail || thumbnail));
+      ops.push(episodeOp(id, seasonId, title, applyWatchSuffix(ep.url, watchSuffix), n, ep.thumbnail || thumbnail));
       episodeCount += 1;
     }
   }
@@ -546,15 +556,13 @@ async function runImport() {
   try {
     if (!currentState.pages.length || currentState.completed) {
       // دورة جديدة (أول مرة، أو بعد اكتمال سابق) — نحتفظ بذاكرة knownIds
-      // وbwatchSuffix عبر الدورات؛ هذا ما يخلي كل عمل مكتمل يُتخطّى فوراً
-      // بمجرد ما نكتشف إنه ما فيه جديد فيه، بدل إعادة كتابته بالكامل كل
-      // مرة، ويمنع إعادة اكتشاف مقطع "watch" من الصفر كل دورة.
-      const preservedWatchChecked = currentState.watchSuffixChecked;
-      const preservedWatchSuffix = currentState.watchSuffix;
+      // وwatchSuffixCache عبر الدورات؛ هذا ما يخلي كل عمل مكتمل يُتخطّى
+      // فوراً بمجرد ما نكتشف إنه ما فيه جديد فيه، بدل إعادة كتابته بالكامل
+      // كل مرة، ويمنع إعادة اكتشاف مقطع "watch" من الصفر لكل عمل بكل دورة.
+      const preservedWatchSuffixCache = currentState.watchSuffixCache;
       currentState = freshState();
       currentState.knownIds = Array.from(knownIds);
-      currentState.watchSuffixChecked = preservedWatchChecked || false;
-      currentState.watchSuffix = preservedWatchSuffix || '';
+      currentState.watchSuffixCache = preservedWatchSuffixCache || {};
       currentState.startedAt = new Date().toISOString();
       currentState.pages = await discoverCatalog(url);
       saveState();
