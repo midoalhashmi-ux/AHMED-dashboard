@@ -299,7 +299,9 @@ async function collectSeriesData(item) {
 async function importOneSeries(item, index, contentType) {
   updateProgress(`(${index + 1}/${currentState.pages.length}) ${item.title || 'عنصر'} — قراءة المواسم والحلقات…`);
   const collected = await collectSeriesData(item);
-  const dataTitle = collected.title || item.title || 'بدون اسم';
+  // عنوان بطاقة القائمة أنظف من عنوان صفحة العمل نفسها في الغالب — صفحة
+  // العمل غالبًا عنوانها SEO كامل يكرر اسم الموقع أو عبارات إضافية.
+  const dataTitle = item.title || collected.title || 'بدون اسم';
   const thumbnail = item.thumbnail || collected.thumbnail || null;
   const showId = hashId(`category|${item.url}`);
   const ops = [categoryOp(showId, dataTitle, null, index + 1, thumbnail, contentType)];
