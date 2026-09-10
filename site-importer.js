@@ -14,6 +14,7 @@ const STATE_PREFIX = 'siteAutoImportStateV2:';
 const LAST_URL_KEY = 'siteAutoImportLastUrl';
 const LAST_TYPE_KEY = 'siteAutoImportLastType';
 const LAST_PARENT_KEY = 'siteAutoImportLastParent';
+const LAST_WATCH_EXAMPLE_KEY = 'siteAutoImportLastWatchExample';
 const BATCH_SIZE = 450;
 const PAGE_LIMIT = 1000;
 
@@ -147,6 +148,20 @@ function applyWatchSuffix(url, suffix) {
   return suffix ? `${url.replace(/\/$/, '')}${suffix}` : url;
 }
 
+// يُستخدم لما يحط المستخدم "مثال رابط حلقة تعمل فعلياً" يدوياً بدل الاعتماد
+// على التخمين التلقائي (ensureWatchSuffix). الافتراض: آخر مقطع بالرابط هو
+// الجزء الإضافي المسؤول عن المشاهدة الفعلية (زي "/see/" أو "/watch/")،
+// وباقي الرابط هو نفس رابط الحلقة الخام اللي يُستخرج من صفحة القائمة —
+// نفس النمط الملاحظ فعلياً بأكثر من موقع.
+function deriveWatchSuffixFromExample(exampleUrl) {
+  try {
+    const u = new URL(exampleUrl);
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (!parts.length) return '';
+    return `/${parts[parts.length - 1]}/`;
+  } catch (_) { return ''; }
+}
+
 async function commitOperations(ops) {
   for (let i = 0; i < ops.length; i += BATCH_SIZE) {
     if (stopRequested) throw new Error('__STOP__');
@@ -240,6 +255,10 @@ function createUI() {
         <div id="site-import-parent-list" style="max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:4px"></div>
       </div>
       <p class="muted" style="margin:0">اتركه فارغاً ليضيف كل عمل كقسم رئيسي مستقل، أو تصفّح/ابحث عن أي قسم موجود (بأي مستوى) — أنشئه أولاً بزر «+ إضافة» ← «📁 قسم» لو ما كان موجوداً — ليضيف كل الأعمال المستورَدة بداخله.</p>
+      <label>مثال رابط حلقة تعمل فعلياً <span class="optional-label">اختياري</span>
+        <input id="site-import-watch-example" type="url" placeholder="https://example.com/watch/episodes/serie-x-season-1-episode-2/see/" />
+      </label>
+      <p class="muted" style="margin:0">اتركه فارغاً ليكتشف الكود نمط رابط المشاهدة تلقائياً لكل عمل على حدة (الافتراضي). لو حطيته، يُستخدم مباشرة لكل حلقات كل الأعمال بهذا الاستيراد بدل التخمين — افتح أي حلقة بالموقع فعلياً وتأكد إنها تشتغل، والصق رابطها هنا كما هو.</p>
       <div id="site-import-progress" class="form-message" role="status">جاهز.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" id="site-import-start">بدء / استئناف</button>
@@ -281,8 +300,10 @@ function createUI() {
   try {
     const lastUrl = localStorage.getItem(LAST_URL_KEY) || '';
     const lastType = localStorage.getItem(LAST_TYPE_KEY) || 'anime';
+    const lastWatchExample = localStorage.getItem(LAST_WATCH_EXAMPLE_KEY) || '';
     urlInput.value = lastUrl;
     typeSelect.value = lastType;
+    card.querySelector('#site-import-watch-example').value = lastWatchExample;
     if (lastUrl) {
       currentStateKey = stateKeyFor(lastUrl);
       currentState = loadState(currentStateKey);
@@ -484,7 +505,7 @@ async function collectSeriesData(item) {
   return { title, thumbnail, episodes, seasons };
 }
 
-async function importOneSeries(item, index, contentType, parentCategoryId) {
+async function importOneSeries(item, index, contentType, parentCategoryId, forcedWatchSuffix) {
   updateProgress(`(${index + 1}/${currentState.pages.length}) ${item.title || 'عنصر'} — قراءة المواسم والحلقات…`);
   const collected = await collectSeriesData(item);
   // عنوان بطاقة القائمة أنظف من عنوان صفحة العمل نفسها في الغالب — صفحة
@@ -511,9 +532,11 @@ async function importOneSeries(item, index, contentType, parentCategoryId) {
     if (hasSeasonName) {
       ops.push(categoryOp(seasonId, season.title || `الموسم ${si + 1}`, showId, si + 1, thumbnail, contentType));
     }
-    const watchSuffix = seasonEpisodes.length
-      ? await ensureWatchSuffix(item.url, seasonEpisodes[0].url)
-      : '';
+    // مثال رابط حلقة يدوي (لو محطوط) يتخطّى التخمين التلقائي كلياً — يُطبَّق
+    // نفسه على كل الأعمال بهذا الاستيراد بدل اكتشاف نمط مستقل لكل عمل.
+    const watchSuffix = forcedWatchSuffix !== undefined
+      ? forcedWatchSuffix
+      : (seasonEpisodes.length ? await ensureWatchSuffix(item.url, seasonEpisodes[0].url) : '');
     for (const ep of seasonEpisodes) {
       if (!ep.url) continue;
       const n = Number.isFinite(ep.episodeNumber) ? ep.episodeNumber : episodeCount + 1;
@@ -541,14 +564,20 @@ async function runImport() {
   const url = card.querySelector('#site-import-url').value.trim();
   const contentType = card.querySelector('#site-import-type').value;
   const parentCategoryId = selectedParentId || '';
+  const watchExample = card.querySelector('#site-import-watch-example').value.trim();
   if (!isValidHttpUrl(url)) { updateProgress('أدخل رابط صفحة القائمة أولاً (يبدأ بـ http:// أو https://).'); return; }
   if (!firebaseReady || !auth || !db) { updateProgress('تعذر الاتصال بخدمة لوحة التحكم. أعد تحميل الصفحة وحاول مرة أخرى.'); return; }
   if (!auth.currentUser) { updateProgress('سجّل الدخول إلى لوحة التحكم أولاً.'); return; }
+  if (watchExample && !isValidHttpUrl(watchExample)) { updateProgress('رابط مثال الحلقة غير صالح — امسحه أو صحّحه.'); return; }
+
+  // لو محطوط، يتجاوز اكتشاف نمط المشاهدة التلقائي كلياً لكل هذا الاستيراد.
+  const forcedWatchSuffix = watchExample ? deriveWatchSuffixFromExample(watchExample) : undefined;
 
   try {
     localStorage.setItem(LAST_URL_KEY, url);
     localStorage.setItem(LAST_TYPE_KEY, contentType);
     localStorage.setItem(LAST_PARENT_KEY, parentCategoryId);
+    localStorage.setItem(LAST_WATCH_EXAMPLE_KEY, watchExample);
   } catch (_) {}
   currentStateKey = stateKeyFor(url);
   currentState = loadState(currentStateKey);
@@ -573,7 +602,7 @@ async function runImport() {
     }
     while (currentState.seriesIndex < currentState.pages.length) {
       if (stopRequested) throw new Error('__STOP__');
-      const result = await importOneSeries(currentState.pages[currentState.seriesIndex], currentState.seriesIndex, contentType, parentCategoryId);
+      const result = await importOneSeries(currentState.pages[currentState.seriesIndex], currentState.seriesIndex, contentType, parentCategoryId, forcedWatchSuffix);
       currentState.importedCategories += result.categoryCount;
       currentState.importedEpisodes += result.episodeCount;
       currentState.doneSeries += 1;
