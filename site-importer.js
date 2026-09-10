@@ -123,20 +123,24 @@ async function worker(path, body) {
 async function ensureWatchSuffix(seriesKey, sampleUrl) {
   const cache = currentState.watchSuffixCache || (currentState.watchSuffixCache = {});
   if (Object.prototype.hasOwnProperty.call(cache, seriesKey)) return cache[seriesKey];
-  let suffix = '';
-  if (sampleUrl) {
-    try {
-      const data = await worker('/import/site', { action: 'resolveEpisode', url: sampleUrl });
-      const watchUrl = data && data.watchUrl;
-      const base = sampleUrl.replace(/\/$/, '');
-      if (watchUrl && watchUrl !== base && watchUrl.startsWith(base)) {
-        suffix = watchUrl.slice(base.length);
-      }
-    } catch (_) { /* أفضل جهد — نبقي روابط الحلقات المباشرة عند الفشل */ }
+  if (!sampleUrl) return '';
+  try {
+    const data = await worker('/import/site', { action: 'resolveEpisode', url: sampleUrl });
+    const watchUrl = data && data.watchUrl;
+    const base = sampleUrl.replace(/\/$/, '');
+    // نخزّن النتيجة فقط عند نجاح الفحص فعلياً — سواء اكتُشف مقطع أو تأكّد
+    // عدم الحاجة له. فشل الفحص نفسه (شبكة، مهلة...) لا يُخزَّن كـ"لا يحتاج
+    // مقطع" نهائياً، حتى لا يُقفَل هذا العمل على نتيجة خاطئة بسبب عطل
+    // عابر — تُعاد المحاولة بموسم/استئناف لاحق بدل قفلها للأبد.
+    const suffix = watchUrl && watchUrl !== base && watchUrl.startsWith(base)
+      ? watchUrl.slice(base.length)
+      : '';
+    cache[seriesKey] = suffix;
+    saveState();
+    return suffix;
+  } catch (_) {
+    return '';
   }
-  cache[seriesKey] = suffix;
-  saveState();
-  return suffix;
 }
 function applyWatchSuffix(url, suffix) {
   if (!url) return url;
