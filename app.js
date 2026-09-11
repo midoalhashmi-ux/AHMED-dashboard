@@ -615,7 +615,8 @@ async function loadCategories() {
       )),
     ]);
     showCategories(snapshot.docs.map((document) => ({ id: document.id, ...document.data() })));
-  } catch (_) {
+  } catch (error) {
+    console.error('[loadCategories] فشل الاتصال بقاعدة الأقسام:', error);
     categoriesLoading.classList.add('hidden');
     categoriesCount.textContent = 'تعذر التحميل';
     categoriesError.textContent = 'تعذر الاتصال بقاعدة الأقسام. اضغط زر إعادة المحاولة. إذا تكرر الخطأ، أعد تسجيل الدخول ثم جرّب مرة أخرى.';
@@ -638,7 +639,8 @@ async function loadChannels() {
     ]);
     currentChannels = snapshot.docs.map((document) => ({ id: document.id, ...document.data() }));
     renderChannelsForCurrentCategory();
-  } catch (_) {
+  } catch (error) {
+    console.error('[loadChannels] فشل الاتصال بقاعدة القنوات:', error);
     currentChannels = [];
     if (currentParentId !== null) {
       channelsLoading.classList.add('hidden');
@@ -1037,7 +1039,8 @@ async function loadStats() {
       fetchStatsCollection('categories'),
       fetchStatsCollection('channels'),
     ]);
-  } catch (_) {
+  } catch (error) {
+    console.error('[loadStats] فشل تحميل الأقسام/القنوات:', error);
     statsCategoriesLoading.classList.add('hidden');
     statsCategoriesEmpty.textContent = 'تعذر تحميل إحصائيات الأقسام.';
     statsCategoriesEmpty.classList.remove('hidden');
@@ -1070,7 +1073,8 @@ async function loadStats() {
         loadStats();
       });
     }
-  } catch (_) {
+  } catch (error) {
+    console.error('[loadStats] فشل حساب الترتيب:', error);
     statsCategoriesLoading.classList.add('hidden');
     statsCategoriesEmpty.textContent = 'تعذر تحميل إحصائيات الأقسام.';
     statsCategoriesEmpty.classList.remove('hidden');
