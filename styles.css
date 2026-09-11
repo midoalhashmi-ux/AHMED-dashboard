@@ -514,6 +514,19 @@ form button { width: 100%; margin-top: 14px; }
 }
 .stats-list-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats-list-count { flex-shrink: 0; color: var(--accent); font-weight: 800; font-size: 0.9rem; }
+.stats-list-item-clickable { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.stats-list-item-clickable:hover { border-color: var(--accent); background: var(--surface-2); }
+.stats-custom-range {
+  display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-top: 10px;
+}
+.stats-custom-range label {
+  display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; color: var(--text-muted);
+}
+.stats-custom-range input[type="date"] {
+  padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text);
+}
+.stats-range-note { margin-top: 8px; font-size: 0.82rem; }
 @media (max-width: 860px) {
   .stats-grid { grid-template-columns: 1fr; }
 }

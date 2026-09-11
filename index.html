@@ -365,12 +365,43 @@
             </div>
           </section>
 
+          <nav id="stats-type-tabs" class="content-type-tabs" aria-label="فلترة القسم">
+            <button class="content-type-tab active" type="button" data-stats-type="all">الكل</button>
+            <button class="content-type-tab" type="button" data-stats-type="channels">📺 القنوات</button>
+            <button class="content-type-tab" type="button" data-stats-type="movies">🎬 الأفلام</button>
+            <button class="content-type-tab" type="button" data-stats-type="series">📺 المسلسلات</button>
+            <button class="content-type-tab" type="button" data-stats-type="anime">🍥 الأنمي</button>
+          </nav>
+
+          <nav id="stats-range-tabs" class="content-type-tabs" style="margin-top:8px" aria-label="المدى الزمني">
+            <button class="content-type-tab active" type="button" data-stats-range="today">اليوم</button>
+            <button class="content-type-tab" type="button" data-stats-range="7d">آخر 7 أيام</button>
+            <button class="content-type-tab" type="button" data-stats-range="30d">آخر 30 يوم</button>
+            <button class="content-type-tab" type="button" data-stats-range="all">كل الوقت</button>
+            <button class="content-type-tab" type="button" data-stats-range="custom">مدى مخصص</button>
+          </nav>
+
+          <div id="stats-custom-range" class="stats-custom-range hidden">
+            <label>من <input id="stats-range-from" type="date"></label>
+            <label>إلى <input id="stats-range-to" type="date"></label>
+            <button id="stats-range-apply" class="secondary-button" type="button">تطبيق</button>
+          </div>
+          <p id="stats-range-note" class="muted stats-range-note hidden"></p>
+          <p class="muted stats-range-note">المدى اليومي (غير «كل الوقت») يبدأ فقط من تاريخ تفعيل هذه الميزة — لا يوجد تفصيل يومي للمشاهدات المسجّلة قبلها.</p>
+
           <div class="stats-grid">
             <section class="card">
-              <h2>الأكثر مشاهدة — المسلسلات والأنمي والأفلام (أقسام)</h2>
-              <p class="muted" style="margin-top:-6px">مجموع مشاهدات كل حلقات المسلسل/الأنمي، على مستوى القسم كاملاً.</p>
+              <div class="section-heading" style="margin-bottom:0">
+                <div>
+                  <h2 id="stats-categories-heading">الأكثر مشاهدة — المسلسلات والأنمي والأفلام (أقسام)</h2>
+                  <p class="muted" style="margin-top:-6px">مجموع مشاهدات كل حلقات المسلسل/الأنمي، على مستوى القسم كاملاً. اضغط على أي قسم لرؤية ترتيب حلقاته بالتحديد.</p>
+                </div>
+                <div class="section-actions">
+                  <button id="stats-drilldown-back" class="secondary-button hidden" type="button">⬅ رجوع لكل الأقسام</button>
+                </div>
+              </div>
               <div id="stats-categories-loading" class="loading-card"><span class="spinner"></span><p>جارٍ التحميل…</p></div>
-              <p id="stats-categories-empty" class="muted hidden">لا توجد مشاهدات مسجّلة بعد.</p>
+              <p id="stats-categories-empty" class="muted hidden">لا توجد مشاهدات مسجّلة بهذا المدى.</p>
               <ol id="stats-categories-list" class="stats-list hidden"></ol>
             </section>
 
@@ -378,7 +409,7 @@
               <h2>الأكثر مشاهدة — القنوات والحلقات (فردياً)</h2>
               <p class="muted" style="margin-top:-6px">كل حلقة/قناة بمفردها، بغض النظر عن القسم.</p>
               <div id="stats-channels-loading" class="loading-card"><span class="spinner"></span><p>جارٍ التحميل…</p></div>
-              <p id="stats-channels-empty" class="muted hidden">لا توجد مشاهدات مسجّلة بعد.</p>
+              <p id="stats-channels-empty" class="muted hidden">لا توجد مشاهدات مسجّلة بهذا المدى.</p>
               <ol id="stats-channels-list" class="stats-list hidden"></ol>
             </section>
           </div>

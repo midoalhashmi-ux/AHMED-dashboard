@@ -10,6 +10,7 @@ import {
   addDoc,
   deleteDoc,
   doc,
+  documentId,
   getDocs,
   getDoc,
   getFirestore,
@@ -19,6 +20,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
@@ -228,9 +230,23 @@ const statsRefreshButton = document.querySelector('#stats-refresh');
 const statsCategoriesLoading = document.querySelector('#stats-categories-loading');
 const statsCategoriesEmpty = document.querySelector('#stats-categories-empty');
 const statsCategoriesList = document.querySelector('#stats-categories-list');
+const statsCategoriesHeading = document.querySelector('#stats-categories-heading');
+const statsDrilldownBack = document.querySelector('#stats-drilldown-back');
 const statsChannelsLoading = document.querySelector('#stats-channels-loading');
 const statsChannelsEmpty = document.querySelector('#stats-channels-empty');
 const statsChannelsList = document.querySelector('#stats-channels-list');
+const statsTypeTabs = document.querySelectorAll('#stats-type-tabs [data-stats-type]');
+const statsRangeTabs = document.querySelectorAll('#stats-range-tabs [data-stats-range]');
+const statsCustomRangeBox = document.querySelector('#stats-custom-range');
+const statsRangeFromInput = document.querySelector('#stats-range-from');
+const statsRangeToInput = document.querySelector('#stats-range-to');
+const statsRangeApplyButton = document.querySelector('#stats-range-apply');
+const statsRangeNote = document.querySelector('#stats-range-note');
+let statsContentType = 'all';
+let statsRangeMode = 'today';
+let statsCustomFrom = '';
+let statsCustomTo = '';
+let statsDrilldownCategoryId = null;
 
 // ---- الشروط والأحكام / سياسة الخصوصية ----
 const legalForm = document.querySelector('#legal-form');
@@ -896,7 +912,7 @@ syncWindowButton?.addEventListener('click', () => runMatchesSync(
 // مرة يفتح فيها مستخدم حلقة/قناة، راجع firestore.rules لقاعدة الأمان
 // الضيّقة التي تسمح بهذه الزيادة فقط دون أي حقل آخر).
 // ==========================================================================
-function renderStatsList(listEl, emptyEl, items) {
+function renderStatsList(listEl, emptyEl, items, onItemClick) {
   if (!items.length) {
     listEl.classList.add('hidden');
     emptyEl.classList.remove('hidden');
@@ -905,15 +921,108 @@ function renderStatsList(listEl, emptyEl, items) {
   emptyEl.classList.add('hidden');
   listEl.classList.remove('hidden');
   listEl.innerHTML = items.map((item, index) => `
-    <li class="stats-list-item">
+    <li class="stats-list-item${onItemClick ? ' stats-list-item-clickable' : ''}"${onItemClick ? ` data-stats-item-id="${escapeHtml(item.id)}"` : ''}>
       <span class="stats-list-rank">${index + 1}</span>
       <span class="stats-list-title">${escapeHtml(item.title || 'بدون اسم')}</span>
       <span class="stats-list-count">${item.viewCount.toLocaleString('ar')} مشاهدة</span>
     </li>
   `).join('');
+  if (onItemClick) {
+    listEl.querySelectorAll('[data-stats-item-id]').forEach((el) => {
+      el.addEventListener('click', () => onItemClick(el.dataset.statsItemId));
+    });
+  }
+}
+
+function utcDateId(date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
+// يرجّع null لـ"كل الوقت" (يعني: استخدم viewCount التراكمي مباشرة بلا فلترة
+// زمنية)، أو {from, to} بصيغة YYYY-MM-DD (بتوقيت UTC، لمطابقة معرّفات
+// dailyViews اللي يكتبها تطبيق المحتوى — راجع ContentService.recordView).
+function statsCurrentRange() {
+  if (statsRangeMode === 'all') return null;
+  if (statsRangeMode === 'today') {
+    const id = utcDateId(new Date());
+    return { from: id, to: id };
+  }
+  if (statsRangeMode === '7d' || statsRangeMode === '30d') {
+    const from = new Date();
+    from.setUTCDate(from.getUTCDate() - (statsRangeMode === '7d' ? 6 : 29));
+    return { from: utcDateId(from), to: utcDateId(new Date()) };
+  }
+  if (statsRangeMode === 'custom') {
+    if (!statsCustomFrom || !statsCustomTo) return null;
+    return statsCustomFrom <= statsCustomTo
+      ? { from: statsCustomFrom, to: statsCustomTo }
+      : { from: statsCustomTo, to: statsCustomFrom };
+  }
+  return null;
+}
+
+async function fetchStatsCollection(collectionName) {
+  const snapshot = await getDocs(collection(db, collectionName));
+  return snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+}
+
+async function sumDailyViews(collectionName, docId, range) {
+  try {
+    const dailyRef = collection(db, collectionName, docId, 'dailyViews');
+    const rangedQuery = query(dailyRef, where(documentId(), '>=', range.from), where(documentId(), '<=', range.to));
+    const snapshot = await getDocs(rangedQuery);
+    let total = 0;
+    snapshot.docs.forEach((docSnap) => { total += Number(docSnap.data().count) || 0; });
+    return total;
+  } catch (_) {
+    return 0;
+  }
+}
+
+// يحسب قائمة مرتّبة (id/title/viewCount) لمجموعة مستندات (أقسام أو قنوات):
+// يستخدم viewCount التراكمي مباشرة لو range فاضي ("كل الوقت")، وإلا يجمع
+// dailyViews لكل مستند عنده مشاهدة تراكمية أصلاً (تقليل عدد الاستعلامات
+// الفرعية بدل فحص كل مستند حتى اللي بدون أي مشاهدة إطلاقاً).
+async function rankByViews(collectionName, docs, range) {
+  const candidates = docs.filter((item) => (item.viewCount || 0) > 0);
+  if (!range) {
+    return candidates
+      .map((item) => ({ id: item.id, title: item.title, viewCount: item.viewCount || 0 }))
+      .sort((a, b) => b.viewCount - a.viewCount);
+  }
+  const sums = await Promise.all(candidates.map((item) => sumDailyViews(collectionName, item.id, range)));
+  return candidates
+    .map((item, index) => ({ id: item.id, title: item.title, viewCount: sums[index] }))
+    .filter((item) => item.viewCount > 0)
+    .sort((a, b) => b.viewCount - a.viewCount);
+}
+
+// نفس منطق شجرة القسم المستخدم بالحذف (getCategoryDeleteTree) لكن على
+// مصفوفة أقسام محلّية مستقلة عن currentCategories — الإحصائيات تجلب
+// نسختها الخاصة من المجموعتين حتى لا ترتبط بتوقيت تحميل باقي الصفحة.
+function statsCategoryTreeIds(categories, rootId) {
+  const ids = new Set([rootId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    categories.forEach((item) => {
+      if (item.parentId && ids.has(item.parentId) && !ids.has(item.id)) {
+        ids.add(item.id);
+        changed = true;
+      }
+    });
+  }
+  return ids;
 }
 
 async function loadStats() {
+  statsRangeNote.classList.add('hidden');
+  const range = statsCurrentRange();
+  if (statsRangeMode === 'custom' && !range) {
+    statsRangeNote.textContent = 'اختر تاريخ «من» و«إلى» ثم اضغط تطبيق.';
+    statsRangeNote.classList.remove('hidden');
+  }
+
   statsCategoriesLoading.classList.remove('hidden');
   statsCategoriesEmpty.classList.add('hidden');
   statsCategoriesList.classList.add('hidden');
@@ -921,14 +1030,46 @@ async function loadStats() {
   statsChannelsEmpty.classList.add('hidden');
   statsChannelsList.classList.add('hidden');
 
+  let categories = [];
+  let channels = [];
   try {
-    const categoriesQuery = query(collection(db, 'categories'), orderBy('viewCount', 'desc'), limit(20));
-    const snapshot = await getDocs(categoriesQuery);
-    const items = snapshot.docs
-      .map((item) => ({ title: item.data().title, viewCount: item.data().viewCount || 0 }))
-      .filter((item) => item.viewCount > 0);
+    [categories, channels] = await Promise.all([
+      fetchStatsCollection('categories'),
+      fetchStatsCollection('channels'),
+    ]);
+  } catch (_) {
     statsCategoriesLoading.classList.add('hidden');
-    renderStatsList(statsCategoriesList, statsCategoriesEmpty, items);
+    statsCategoriesEmpty.textContent = 'تعذر تحميل إحصائيات الأقسام.';
+    statsCategoriesEmpty.classList.remove('hidden');
+    statsChannelsLoading.classList.add('hidden');
+    statsChannelsEmpty.textContent = 'تعذر تحميل إحصائيات القنوات.';
+    statsChannelsEmpty.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    if (statsDrilldownCategoryId) {
+      const category = categories.find((item) => item.id === statsDrilldownCategoryId);
+      statsCategoriesHeading.textContent = `الأكثر مشاهدة — حلقات/قنوات «${category?.title || ''}»`;
+      statsDrilldownBack.classList.remove('hidden');
+      const treeIds = statsCategoryTreeIds(categories, statsDrilldownCategoryId);
+      const channelsInTree = channels.filter((channel) => treeIds.has(channel.categoryId));
+      const items = await rankByViews('channels', channelsInTree, range);
+      statsCategoriesLoading.classList.add('hidden');
+      renderStatsList(statsCategoriesList, statsCategoriesEmpty, items.slice(0, 20));
+    } else {
+      statsCategoriesHeading.textContent = 'الأكثر مشاهدة — المسلسلات والأنمي والأفلام (أقسام)';
+      statsDrilldownBack.classList.add('hidden');
+      const pool = statsContentType === 'all'
+        ? categories
+        : categories.filter((item) => (item.contentType || 'channels') === statsContentType);
+      const items = await rankByViews('categories', pool, range);
+      statsCategoriesLoading.classList.add('hidden');
+      renderStatsList(statsCategoriesList, statsCategoriesEmpty, items.slice(0, 20), (id) => {
+        statsDrilldownCategoryId = id;
+        loadStats();
+      });
+    }
   } catch (_) {
     statsCategoriesLoading.classList.add('hidden');
     statsCategoriesEmpty.textContent = 'تعذر تحميل إحصائيات الأقسام.';
@@ -936,13 +1077,13 @@ async function loadStats() {
   }
 
   try {
-    const channelsQuery = query(collection(db, 'channels'), orderBy('viewCount', 'desc'), limit(20));
-    const snapshot = await getDocs(channelsQuery);
-    const items = snapshot.docs
-      .map((item) => ({ title: item.data().title, viewCount: item.data().viewCount || 0 }))
-      .filter((item) => item.viewCount > 0);
+    const categoryIdsForType = statsContentType === 'all'
+      ? null
+      : new Set(categories.filter((item) => (item.contentType || 'channels') === statsContentType).map((item) => item.id));
+    const pool = categoryIdsForType ? channels.filter((channel) => categoryIdsForType.has(channel.categoryId)) : channels;
+    const items = await rankByViews('channels', pool, range);
     statsChannelsLoading.classList.add('hidden');
-    renderStatsList(statsChannelsList, statsChannelsEmpty, items);
+    renderStatsList(statsChannelsList, statsChannelsEmpty, items.slice(0, 20));
   } catch (_) {
     statsChannelsLoading.classList.add('hidden');
     statsChannelsEmpty.textContent = 'تعذر تحميل إحصائيات القنوات.';
@@ -951,6 +1092,27 @@ async function loadStats() {
 }
 
 statsRefreshButton.addEventListener('click', loadStats);
+statsDrilldownBack.addEventListener('click', () => {
+  statsDrilldownCategoryId = null;
+  loadStats();
+});
+statsTypeTabs.forEach((button) => button.addEventListener('click', () => {
+  statsContentType = button.dataset.statsType || 'all';
+  statsDrilldownCategoryId = null;
+  statsTypeTabs.forEach((item) => item.classList.toggle('active', item === button));
+  loadStats();
+}));
+statsRangeTabs.forEach((button) => button.addEventListener('click', () => {
+  statsRangeMode = button.dataset.statsRange || 'today';
+  statsRangeTabs.forEach((item) => item.classList.toggle('active', item === button));
+  statsCustomRangeBox.classList.toggle('hidden', statsRangeMode !== 'custom');
+  if (statsRangeMode !== 'custom') loadStats();
+}));
+statsRangeApplyButton.addEventListener('click', () => {
+  statsCustomFrom = statsRangeFromInput.value;
+  statsCustomTo = statsRangeToInput.value;
+  loadStats();
+});
 
 // ==========================================================================
 // الرسائل الواردة (contactMessages) — تواصل معنا / إبلاغ عن رابط معطوب
