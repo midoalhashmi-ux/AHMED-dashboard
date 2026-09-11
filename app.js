@@ -1540,8 +1540,16 @@ function getCategoryDeleteTree(rootId) {
   return [...ids];
 }
 
+// حذف الأقسام (فردي أو جماعي) يحتاج كلمة مرور تأكيد فعلية قبل التنفيذ —
+// طبقة أمان إضافية ضد حذف عرضي، بجانب رسالة "هل تريد المتابعة؟" العادية
+// الموجودة قبل هذا الاستدعاء بكل من الحذف الفردي والجماعي.
+const CATEGORY_DELETE_PIN = '5115';
 function requestDeleteConfirmation(message) {
-  return window.confirm(message.replace('أدخل كلمة المرور لتأكيد', 'هل أنت متأكد من'));
+  const entered = window.prompt(message);
+  if (entered === null) return false; // إلغاء
+  if (entered.trim() === CATEGORY_DELETE_PIN) return true;
+  window.alert('كلمة المرور غير صحيحة — تم إلغاء الحذف.');
+  return false;
 }
 
 async function deleteCategoryTree(rootId) {

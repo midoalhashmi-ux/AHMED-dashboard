@@ -6,6 +6,8 @@ import {
   query,
   where,
   getDocs,
+  setDoc,
+  deleteDoc,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const WORKER_BASE_URL = 'https://binsheikh-api.binsheikh.workers.dev';
@@ -263,6 +265,99 @@ function guessContentType(item, collected, selectedType) {
   return selectedType === 'movies' ? 'series' : selectedType;
 }
 
+// سجل "المواقع المعروفة" (Firestore: importSites/{domain}) — بديل مؤكَّد
+// لتخمين guessContentType أعلاه لأي موقع يُضاف هنا مرة واحدة: نوعه بيقين
+// بدل تخمين تلقائي بلا دليل قاطع (تحديداً أنمي مقابل مسلسل، حيث لا توجد
+// إشارة بنائية موثوقة أصلاً). يُحمَّل مرة واحدة لعمر الصفحة ويُحدَّث محلياً
+// مع كل إضافة/حذف بدل إعادة القراءة من Firestore في كل مرة.
+let knownSites = new Map(); // domain -> {contentType, label}
+let knownSitesLoaded = false;
+
+function domainFromUrl(value) {
+  try {
+    const url = new URL(value.includes('://') ? value : `https://${value}`);
+    return url.hostname.replace(/^www\./, '').toLowerCase();
+  } catch (_) { return ''; }
+}
+
+async function loadKnownSites() {
+  if (knownSitesLoaded || !db) return;
+  knownSitesLoaded = true;
+  try {
+    const snap = await getDocs(collection(db, 'importSites'));
+    snap.forEach((d) => {
+      const data = d.data() || {};
+      knownSites.set(d.id, { contentType: data.contentType || 'series', label: data.label || '' });
+    });
+  } catch (_) { /* أفضل جهد — بدون السجل، الاستيراد يرجع للتخمين التلقائي كالمعتاد */ }
+  renderKnownSitesList();
+}
+
+async function addKnownSite(rawDomain, contentType) {
+  const domain = domainFromUrl(rawDomain) || rawDomain.trim().toLowerCase().replace(/^www\./, '');
+  if (!domain || !domain.includes('.')) {
+    updateProgress('أدخل دومين صالحاً (مثلاً example.com) قبل الإضافة.');
+    return;
+  }
+  try {
+    await setDoc(doc(db, 'importSites', domain), {
+      domain, contentType, addedAt: serverTimestamp(),
+    }, { merge: true });
+    knownSites.set(domain, { contentType, label: '' });
+    renderKnownSitesList();
+  } catch (_) {
+    window.alert('تعذر إضافة الموقع. تحقق من قواعد Firestore وحاول مرة أخرى.');
+  }
+}
+
+async function removeKnownSite(domain) {
+  try {
+    await deleteDoc(doc(db, 'importSites', domain));
+    knownSites.delete(domain);
+    renderKnownSitesList();
+  } catch (_) {
+    window.alert('تعذر حذف الموقع. حاول مرة أخرى.');
+  }
+}
+
+const CONTENT_TYPE_LABELS = { anime: '🍥 أنمي', series: '📺 مسلسلات', movies: '🎬 أفلام', channels: '📺 قنوات' };
+
+function renderKnownSitesList() {
+  const list = document.querySelector('#site-import-known-list');
+  if (!list) return;
+  if (!knownSites.size) {
+    list.innerHTML = '<p class="muted" style="margin:0">لا مواقع مضافة بعد.</p>';
+    return;
+  }
+  list.innerHTML = [...knownSites.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([domain, info]) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid rgba(255,255,255,0.12);border-radius:8px">
+        <span style="flex:1;direction:ltr;text-align:left">${domain}</span>
+        <span class="muted">${CONTENT_TYPE_LABELS[info.contentType] || info.contentType}</span>
+        <button type="button" class="secondary-button" data-remove-known-site="${domain}">🗑</button>
+      </div>
+    `).join('');
+  list.querySelectorAll('[data-remove-known-site]').forEach((button) => {
+    button.addEventListener('click', () => removeKnownSite(button.dataset.removeKnownSite));
+  });
+}
+
+// عند لصق/تعديل رابط الاستيراد: لو دومينه مسجَّل بسجل المواقع المعروفة،
+// يملأ حقل «نوع المحتوى» تلقائياً بنوعه المؤكَّد ويظهر تنبيهاً — بدل ترك
+// المستخدم يختار يدوياً ويخاطر بنوع خاطئ لموقع يعرف نوعه فعلاً مسبقاً.
+function applyKnownSiteHint(urlValue, typeSelect, hintEl) {
+  const domain = domainFromUrl(urlValue);
+  const known = domain ? knownSites.get(domain) : null;
+  if (!known) {
+    hintEl.classList.add('hidden');
+    return;
+  }
+  typeSelect.value = known.contentType;
+  hintEl.textContent = `✓ موقع معروف (${domain}) — النوع: ${CONTENT_TYPE_LABELS[known.contentType] || known.contentType}`;
+  hintEl.classList.remove('hidden');
+}
+
 // ذاكرة مؤقتة (لعمر المهمة الحالية فقط) لأقسام كل نوع محتوى — تُجلب مرة
 // واحدة لكل نوع، وتُحدَّث محلياً كل ما أنشأنا قسماً جديداً بنفس هذا
 // الاستيراد، بدل استعلام Firestore لكل عمل على حدة. خانة منفصلة لكل نوع
@@ -366,6 +461,22 @@ function createUI() {
       <label>رابط صفحة القائمة
         <input id="site-import-url" type="url" placeholder="https://example.com/anime-list/" />
       </label>
+      <p id="site-import-known-hint" class="muted hidden" style="margin:-6px 0 0"></p>
+      <details id="site-import-known-sites-panel" style="border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:8px">
+        <summary>🌐 المواقع المعروفة (نوع مؤكَّد بدل التخمين)</summary>
+        <div id="site-import-known-list" style="display:flex;flex-direction:column;gap:6px;margin:10px 0"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input id="site-import-known-domain" type="text" placeholder="دومين الموقع، مثلاً: example.com" style="flex:1;min-width:160px" />
+          <select id="site-import-known-type">
+            <option value="anime">🍥 أنمي</option>
+            <option value="series">📺 مسلسلات</option>
+            <option value="movies">🎬 أفلام</option>
+            <option value="channels">📺 قنوات</option>
+          </select>
+          <button type="button" id="site-import-known-add" class="secondary-button">+ إضافة</button>
+        </div>
+        <p class="muted" style="margin:6px 0 0">أضف أي موقع تستورد منه بانتظام مع نوعه الحقيقي — الاستيراد يستخدم هذا النوع بيقين لأي رابط من نفس الدومين بدل تخمينه تلقائياً، ويملأ حقل «نوع المحتوى» تحت هذا تلقائياً عند لصق رابط دومين معروف.</p>
+      </details>
       <label>نوع المحتوى
         <select id="site-import-type">
           <option value="anime">🍥 أنمي</option>
@@ -403,6 +514,15 @@ function createUI() {
 
   const urlInput = card.querySelector('#site-import-url');
   const typeSelect = card.querySelector('#site-import-type');
+  const knownHint = card.querySelector('#site-import-known-hint');
+  loadKnownSites().then(() => applyKnownSiteHint(urlInput.value, typeSelect, knownHint));
+  urlInput.addEventListener('input', () => applyKnownSiteHint(urlInput.value, typeSelect, knownHint));
+  card.querySelector('#site-import-known-add').addEventListener('click', () => {
+    const domainInput = card.querySelector('#site-import-known-domain');
+    const typeInput = card.querySelector('#site-import-known-type');
+    addKnownSite(domainInput.value, typeInput.value);
+    domainInput.value = '';
+  });
   card.querySelector('#site-import-start').addEventListener('click', () => runImport());
   card.querySelector('#site-import-close').addEventListener('click', () => card.classList.add('hidden'));
   card.querySelector('#site-import-stop').addEventListener('click', () => { stopRequested = true; updateProgress('سيتم الإيقاف بعد اكتمال الدفعة الحالية…'); });
@@ -643,13 +763,16 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
   const dataTitle = item.title || collected.title || 'بدون اسم';
   const thumbnail = item.thumbnail || collected.thumbnail || null;
 
-  // نوع المحتوى الفعلي لهذا العنصر تحديداً — راجع guessContentType أعلاه.
-  // لو صفحة القائمة نوع واحد فعلاً (الحالة الشائعة)، detectedType نفس
-  // contentType المختار دائماً ولا يتغيّر شيء. لو مختلفة (صفحة قائمة
-  // مختلطة)، القسم الوجهة المختار بالنموذج ينتمي لشجرة النوع الآخر أصلاً
-  // فلا معنى لوضع هذا العنصر بداخله — يُضاف كقسم رئيسي مستقل بنوعه
-  // الحقيقي بدل تصنيفه خطأً أو محاولة تخمين مكانه بشجرة لا يعرفها.
-  const detectedType = guessContentType(item, collected, contentType);
+  // نوع المحتوى الفعلي لهذا العنصر تحديداً. الموقع المعروف (راجع سجل
+  // «المواقع المعروفة» بالنموذج) نوعه بيقين مؤكَّد مسبقاً — يُستخدم مباشرة
+  // بدل التخمين. غير ذلك، guessContentType تخمين بأفضل جهد (موثوق لفيلم
+  // مقابل عمل بحلقات، أضعف لأنمي مقابل مسلسل). لو صفحة القائمة نوع واحد
+  // فعلاً (الحالة الشائعة)، detectedType نفس contentType المختار دائماً
+  // ولا يتغيّر شيء. لو مختلفة (صفحة قائمة مختلطة، أو موقع معروف بنوع غير
+  // المختار بالنموذج)، القسم الوجهة المختار ينتمي لشجرة النوع الآخر أصلاً
+  // فلا معنى لوضع هذا العنصر بداخله — يُضاف كقسم رئيسي مستقل بنوعه الحقيقي.
+  const detectedType = knownSites.get(domainFromUrl(item.url))?.contentType
+    || guessContentType(item, collected, contentType);
   const reclassified = detectedType !== contentType;
   const effectiveParentId = reclassified ? null : (parentCategoryId || null);
   const existingCategories = await loadExistingCategories(detectedType);
