@@ -189,7 +189,7 @@ function categoryOp(id, title, parentId, order, thumbnail, contentType) {
     }, { merge: true }),
   };
 }
-function episodeOp(id, categoryId, title, sourceUrl, order, thumbnail, sourceLabel) {
+function episodeOp(id, categoryId, title, sourceUrl, order, thumbnail) {
   return {
     id,
     kind: 'episode',
@@ -199,9 +199,10 @@ function episodeOp(id, categoryId, title, sourceUrl, order, thumbnail, sourceLab
       logoUrl: thumbnail || null,
       streamType: 'web',
       sourceUrl,
-      // مصدر واحد بالبداية دائماً — راجع episodeSourceMergeOp أدناه لكيف
-      // يضاف مصدر ثانٍ لاحقاً عند استيراد نفس العمل من موقع آخر.
-      sources: [{ label: sourceLabel || 'المصدر الأول', url: sourceUrl }],
+      // مصدر واحد بالبداية دائماً، مُرقَّم ترتيبياً — هذا بالضبط ما يظهر
+      // كزر بالمشغّل ("سيرفر 1"). راجع episodeSourceMergeOp أدناه لكيف
+      // يضاف "سيرفر 2" لاحقاً عند استيراد نفس العمل من موقع آخر.
+      sources: [{ label: 'سيرفر 1', url: sourceUrl }],
       directUrl: null,
       protected: false,
       sourceHeaders: {},
@@ -234,11 +235,6 @@ function normalizeTitleForMatch(title) {
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
-}
-
-function siteLabelFromUrl(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ''); }
-  catch (_) { return 'مصدر آخر'; }
 }
 
 // ذاكرة مؤقتة (لعمر المهمة الحالية فقط) لأقسام نوع محتوى واحد — تُجلب مرة
@@ -297,12 +293,12 @@ function findExistingEpisode(list, order, title) {
   if (!norm) return null;
   return list.find(e => normalizeTitleForMatch(e.title) === norm) || null;
 }
-function episodeSourceMergeOp(existing, newLabel, newUrl) {
+function episodeSourceMergeOp(existing, newUrl) {
   const sources = existing.sources.length
     ? existing.sources.slice()
-    : (existing.sourceUrl ? [{ label: 'المصدر الأول', url: existing.sourceUrl }] : []);
+    : (existing.sourceUrl ? [{ label: 'سيرفر 1', url: existing.sourceUrl }] : []);
   if (sources.some(s => s.url === newUrl)) return null; // نفس الرابط مضاف مسبقاً — لا شيء جديد
-  sources.push({ label: newLabel, url: newUrl });
+  sources.push({ label: `سيرفر ${sources.length + 1}`, url: newUrl });
   return {
     id: existing.id,
     kind: 'episode-merge',
@@ -617,7 +613,6 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
   // العمل غالبًا عنوانها SEO كامل يكرر اسم الموقع أو عبارات إضافية.
   const dataTitle = item.title || collected.title || 'بدون اسم';
   const thumbnail = item.thumbnail || collected.thumbnail || null;
-  const sourceLabel = siteLabelFromUrl(item.url);
   const existingCategories = await loadExistingCategories(contentType);
 
   // نفس العمل مستورد مسبقاً (من موقع آخر على الأغلب) بنفس القسم الوجهة؟
@@ -678,11 +673,11 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
       const finalUrl = applyWatchSuffix(ep.url, watchSuffix);
       const match = existingEpisodes.length ? findExistingEpisode(existingEpisodes, n, title) : null;
       if (match) {
-        const mergeOp = episodeSourceMergeOp(match, sourceLabel, finalUrl);
+        const mergeOp = episodeSourceMergeOp(match, finalUrl);
         if (mergeOp) { ops.push(mergeOp); mergedSourceCount += 1; }
       } else {
         const id = hashId(`episode|${seasonId}|${ep.url}`);
-        ops.push(episodeOp(id, seasonId, title, finalUrl, n, ep.thumbnail || thumbnail, sourceLabel));
+        ops.push(episodeOp(id, seasonId, title, finalUrl, n, ep.thumbnail || thumbnail));
       }
       episodeCount += 1;
     }

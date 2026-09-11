@@ -166,6 +166,8 @@ const channelApiUserAgent = document.querySelector('#channel-api-user-agent');
 const channelSourceReferer = document.querySelector('#channel-source-referer');
 const channelSourceUserAgent = document.querySelector('#channel-source-user-agent');
 const channelSourceHelp = document.querySelector('#channel-source-help');
+const channelSourcesPanel = document.querySelector('#channel-sources-panel');
+const channelSourcesList = document.querySelector('#channel-sources-list');
 const channelEditId = document.querySelector('#channel-edit-id');
 const channelFormTitle = document.querySelector('#channel-form-title');
 const channelSaveButton = document.querySelector('#channel-save-button');
@@ -352,6 +354,43 @@ function contentEntryLabel(contentType) {
   return ({ channels: 'قناة', movies: 'فيلم', series: 'مسلسل', anime: 'أنمي' }[contentType] || 'محتوى');
 }
 
+// عرض للقراءة (بدون إضافة يدوية — يملؤها استيراد المواقع فقط حالياً)
+// لمصادر الحلقة البديلة عبر مواقع مختلفة. حذف مصدر مسموح لأي مصدر غير
+// الأول (السيرفر الأساسي) فقط، تجنّباً للحاجة لإعادة ترقيم/تحديث sourceUrl.
+function renderChannelSourcesPanel(channel) {
+  const sources = Array.isArray(channel?.sources) ? channel.sources : [];
+  if (sources.length < 2) {
+    channelSourcesPanel.classList.add('hidden');
+    channelSourcesList.innerHTML = '';
+    return;
+  }
+  channelSourcesPanel.classList.remove('hidden');
+  channelSourcesList.innerHTML = sources.map((source, index) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
+      <strong style="flex-shrink:0">${escapeHtml(source?.label || `سيرفر ${index + 1}`)}</strong>
+      <span class="muted" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;text-align:left">${escapeHtml(source?.url || '')}</span>
+      ${index > 0 ? `<button type="button" class="secondary-button" data-remove-source-index="${index}">🗑 حذف</button>` : ''}
+    </div>
+  `).join('');
+  channelSourcesList.querySelectorAll('[data-remove-source-index]').forEach((button) => {
+    button.addEventListener('click', () => removeChannelSource(channel.id, Number(button.dataset.removeSourceIndex)));
+  });
+}
+async function removeChannelSource(channelId, index) {
+  const channel = currentChannels.find((item) => item.id === channelId);
+  if (!channel || index < 1) return;
+  const sources = Array.isArray(channel.sources) ? channel.sources.slice() : [];
+  if (index >= sources.length) return;
+  sources.splice(index, 1);
+  try {
+    await updateDoc(doc(db, 'channels', channelId), { sources });
+    channel.sources = sources;
+    renderChannelSourcesPanel(channel);
+  } catch (_) {
+    window.alert('تعذر حذف المصدر. حاول مرة أخرى.');
+  }
+}
+
 async function openChannelForm(existingId) {
   if (currentParentId === null) return;
   closeAllFormCards();
@@ -410,6 +449,7 @@ async function openChannelForm(existingId) {
       channelSourceUrl.value = channel.directUrl || '';
     }
     setSourceUi(streamType);
+    renderChannelSourcesPanel(channel);
     channelFormTitle.textContent = `تعديل: ${channel.title || label}`;
     channelSaveButton.textContent = 'حفظ التعديل';
   } else {
@@ -423,6 +463,7 @@ async function openChannelForm(existingId) {
     channelSourceReferer.value = '';
     channelSourceUserAgent.value = '';
     setSourceUi('hls');
+    channelSourcesPanel.classList.add('hidden');
     channelFormTitle.textContent = `إضافة ${label} داخل «${parent?.title || ''}»`;
     channelSaveButton.textContent = 'حفظ';
   }
