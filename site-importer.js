@@ -44,7 +44,8 @@ let selectedParentLabel = '— بدون (قسم رئيسي مستقل) —';
 
 function freshState() {
   return {
-    version: 5, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0,
+    version: 6, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0,
+    importedMergedSources: 0,
     startedAt: null, lastError: '', completed: false, knownIds: [],
     // بعض المواقع تعرض صفحة "معلومات الحلقة" بدون أي مصدر تشغيل، والمشاهدة
     // الفعلية بنفس الرابط + مقطع إضافي (مثلاً ".../see/"). يُكتشف مرة واحدة
@@ -188,7 +189,7 @@ function categoryOp(id, title, parentId, order, thumbnail, contentType) {
     }, { merge: true }),
   };
 }
-function episodeOp(id, categoryId, title, sourceUrl, order, thumbnail) {
+function episodeOp(id, categoryId, title, sourceUrl, order, thumbnail, sourceLabel) {
   return {
     id,
     kind: 'episode',
@@ -198,11 +199,115 @@ function episodeOp(id, categoryId, title, sourceUrl, order, thumbnail) {
       logoUrl: thumbnail || null,
       streamType: 'web',
       sourceUrl,
+      // مصدر واحد بالبداية دائماً — راجع episodeSourceMergeOp أدناه لكيف
+      // يضاف مصدر ثانٍ لاحقاً عند استيراد نفس العمل من موقع آخر.
+      sources: [{ label: sourceLabel || 'المصدر الأول', url: sourceUrl }],
       directUrl: null,
       protected: false,
       sourceHeaders: {},
       apiHeaders: {},
       order: Number.isFinite(order) ? order : 0,
+      updatedAt: serverTimestamp(),
+    }, { merge: true }),
+  };
+}
+
+// دمج المصادر عبر المواقع: نفس العمل (مسلسل/فلم/أنمي) مستورد سابقاً من
+// موقع آخر لنفس القسم الوجهة — بدل تكرار قسم/حلقة منفصلة بالكامل، تُضاف
+// هذه الحلقة الجديدة كمصدر إضافي لنفس مستند الحلقة الموجود (sources[]).
+// تطبيق المشغّل يقرأ هذه القائمة كسيرفرات بديلة — لو فشل السيرفر الأول
+// يجرّب التالي تلقائياً (راجع channel_source_resolver.dart بمستودع
+// BinSheikh وwatch_screen.dart بمستودع sports_player).
+//
+// مطابقة العنوان تتجاهل التشكيل واختلافات الألف/الياء/التاء المربوطة
+// الشائعة بالعربية، وتختصر لحروف/أرقام فقط — عناوين متطابقة معنىً لكن
+// بإملاء مختلف قليلاً بين موقعين لا تفوّت الدمج بسبب هذا فقط.
+function normalizeTitleForMatch(title) {
+  return String(title || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '') // diacritics لاتينية (لو وُجدت)
+    .replace(/[ً-ٰٟ]/g, '') // تشكيل عربي
+    .replace(/[إأآا]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function siteLabelFromUrl(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch (_) { return 'مصدر آخر'; }
+}
+
+// ذاكرة مؤقتة (لعمر المهمة الحالية فقط) لأقسام نوع محتوى واحد — تُجلب مرة
+// واحدة، وتُحدَّث محلياً كل ما أنشأنا قسماً جديداً بنفس هذا الاستيراد، بدل
+// استعلام Firestore لكل عمل على حدة.
+let existingCategoriesCache = null;
+async function loadExistingCategories(contentType) {
+  if (existingCategoriesCache && existingCategoriesCache.contentType === contentType) {
+    return existingCategoriesCache.list;
+  }
+  const list = [];
+  try {
+    const snap = await getDocs(query(collection(db, 'categories'), where('contentType', '==', contentType)));
+    snap.forEach(d => list.push({ id: d.id, title: d.data()?.title || '', parentId: d.data()?.parentId || null }));
+  } catch (_) { /* أفضل جهد — عدم العثور على تطابق يعني إنشاء قسم جديد كالمعتاد */ }
+  existingCategoriesCache = { contentType, list };
+  return list;
+}
+function rememberNewCategory(id, title, parentId) {
+  if (existingCategoriesCache) existingCategoriesCache.list.push({ id, title, parentId: parentId || null });
+}
+function findExistingCategory(list, parentId, title) {
+  const norm = normalizeTitleForMatch(title);
+  if (!norm) return null;
+  const target = parentId || null;
+  return list.find(c => (c.parentId || null) === target && normalizeTitleForMatch(c.title) === norm) || null;
+}
+
+// حلقات قسم/موسم موجود مسبقاً — تُجلب مرة واحدة فقط لكل موسم فعلياً محتاج
+// فحص تكرار (موسم جديد كلياً بهذا الاستيراد لا يحتاج، لا يوجد تحته شيء بعد).
+async function loadExistingEpisodes(seasonId) {
+  const list = [];
+  try {
+    const snap = await getDocs(query(collection(db, 'channels'), where('categoryId', '==', seasonId)));
+    snap.forEach(d => {
+      const data = d.data() || {};
+      list.push({
+        id: d.id,
+        title: data.title || '',
+        order: Number(data.order) || 0,
+        sourceUrl: data.sourceUrl || '',
+        sources: Array.isArray(data.sources) ? data.sources : [],
+      });
+    });
+  } catch (_) {}
+  return list;
+}
+// رقم الحلقة أدق من العنوان (عناوين الحلقات كثيراً ما تتطابق حرفياً بين
+// مواقع مختلفة أصلاً، لكن رقم الحلقة أقل عرضة لاختلافات صياغة العنوان).
+function findExistingEpisode(list, order, title) {
+  if (Number.isFinite(order)) {
+    const byOrder = list.find(e => e.order === order);
+    if (byOrder) return byOrder;
+  }
+  const norm = normalizeTitleForMatch(title);
+  if (!norm) return null;
+  return list.find(e => normalizeTitleForMatch(e.title) === norm) || null;
+}
+function episodeSourceMergeOp(existing, newLabel, newUrl) {
+  const sources = existing.sources.length
+    ? existing.sources.slice()
+    : (existing.sourceUrl ? [{ label: 'المصدر الأول', url: existing.sourceUrl }] : []);
+  if (sources.some(s => s.url === newUrl)) return null; // نفس الرابط مضاف مسبقاً — لا شيء جديد
+  sources.push({ label: newLabel, url: newUrl });
+  return {
+    id: existing.id,
+    kind: 'episode-merge',
+    run: batch => batch.set(doc(db, 'channels', existing.id), {
+      sources,
       updatedAt: serverTimestamp(),
     }, { merge: true }),
   };
@@ -512,9 +617,21 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
   // العمل غالبًا عنوانها SEO كامل يكرر اسم الموقع أو عبارات إضافية.
   const dataTitle = item.title || collected.title || 'بدون اسم';
   const thumbnail = item.thumbnail || collected.thumbnail || null;
-  const showId = hashId(`category|${item.url}`);
-  const ops = [categoryOp(showId, dataTitle, parentCategoryId || null, index + 1, thumbnail, contentType)];
+  const sourceLabel = siteLabelFromUrl(item.url);
+  const existingCategories = await loadExistingCategories(contentType);
+
+  // نفس العمل مستورد مسبقاً (من موقع آخر على الأغلب) بنفس القسم الوجهة؟
+  // نعيد استخدام قسمه بدل إنشاء نسخة مكررة كاملة — بدون لمس عنوانه/صورته
+  // الحاليين (قد يكونا عُدِّلا يدوياً). حلقاته المطابقة تكتسب هذا الموقع
+  // كمصدر إضافي بدل تكرارها (راجع episodeSourceMergeOp تحت).
+  const existingShow = findExistingCategory(existingCategories, parentCategoryId || null, dataTitle);
+  const showId = existingShow ? existingShow.id : hashId(`category|${item.url}`);
+  const ops = existingShow
+    ? []
+    : [categoryOp(showId, dataTitle, parentCategoryId || null, index + 1, thumbnail, contentType)];
+  if (!existingShow) rememberNewCategory(showId, dataTitle, parentCategoryId || null);
   let episodeCount = 0; // عدّاد ترقيم احتياطي فقط لحلقة بلا رقم صريح
+  let mergedSourceCount = 0;
 
   const seasonEntries = collected.seasons.length
     ? collected.seasons
@@ -528,34 +645,62 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
       seasonEpisodes = seasonData.episodes;
     }
     const hasSeasonName = collected.seasons.length > 0;
-    const seasonId = hasSeasonName ? hashId(`category|${item.url}|season|${season.url || season.title || si}`) : showId;
-    if (hasSeasonName) {
-      ops.push(categoryOp(seasonId, season.title || `الموسم ${si + 1}`, showId, si + 1, thumbnail, contentType));
+    const seasonTitle = season.title || `الموسم ${si + 1}`;
+    let seasonId;
+    let seasonIsNew;
+    if (!hasSeasonName) {
+      seasonId = showId;
+      seasonIsNew = !existingShow;
+    } else {
+      const existingSeason = findExistingCategory(existingCategories, showId, seasonTitle);
+      seasonIsNew = !existingSeason;
+      seasonId = existingSeason
+        ? existingSeason.id
+        : hashId(`category|${item.url}|season|${season.url || season.title || si}`);
+      if (seasonIsNew) {
+        ops.push(categoryOp(seasonId, seasonTitle, showId, si + 1, thumbnail, contentType));
+        rememberNewCategory(seasonId, seasonTitle, showId);
+      }
     }
     // مثال رابط حلقة يدوي (لو محطوط) يتخطّى التخمين التلقائي كلياً — يُطبَّق
     // نفسه على كل الأعمال بهذا الاستيراد بدل اكتشاف نمط مستقل لكل عمل.
     const watchSuffix = forcedWatchSuffix !== undefined
       ? forcedWatchSuffix
       : (seasonEpisodes.length ? await ensureWatchSuffix(item.url, seasonEpisodes[0].url) : '');
+    // موسم/عمل جديد كلياً بهذا الاستيراد لا يحتاج فحص تكرار — لا يوجد أي
+    // حلقة تحته أصلاً بعد. الموسم الموجود مسبقاً (من موقع آخر) فقط يحتاج
+    // جلب حلقاته الحالية لمطابقتها بالحلقات الجديدة بدل تكرارها.
+    const existingEpisodes = seasonIsNew ? [] : await loadExistingEpisodes(seasonId);
     for (const ep of seasonEpisodes) {
       if (!ep.url) continue;
       const n = Number.isFinite(ep.episodeNumber) ? ep.episodeNumber : episodeCount + 1;
       const title = ep.title || `${dataTitle} - الحلقة ${n}`;
-      const id = hashId(`episode|${seasonId}|${ep.url}`);
-      ops.push(episodeOp(id, seasonId, title, applyWatchSuffix(ep.url, watchSuffix), n, ep.thumbnail || thumbnail));
+      const finalUrl = applyWatchSuffix(ep.url, watchSuffix);
+      const match = existingEpisodes.length ? findExistingEpisode(existingEpisodes, n, title) : null;
+      if (match) {
+        const mergeOp = episodeSourceMergeOp(match, sourceLabel, finalUrl);
+        if (mergeOp) { ops.push(mergeOp); mergedSourceCount += 1; }
+      } else {
+        const id = hashId(`episode|${seasonId}|${ep.url}`);
+        ops.push(episodeOp(id, seasonId, title, finalUrl, n, ep.thumbnail || thumbnail, sourceLabel));
+      }
       episodeCount += 1;
     }
   }
   // تخطّي كل ما سبق كتابته فعلياً — هذا ما يمنع إعادة استهلاك الوقت وحصة
   // Firestore على أعمال كاملة لم يتغيّر فيها شيء؛ لازم نفتح صفحة العمل
-  // لنعرف هل فيه جديد، لكن ما نكتب إلا الجديد فعلاً.
-  const newOps = ops.filter(op => !knownIds.has(op.id));
-  if (!newOps.length) return { categoryCount: 0, episodeCount: 0 };
+  // لنعرف هل فيه جديد، لكن ما نكتب إلا الجديد فعلاً. دمج مصدر (episode-
+  // merge) مستثنى من هذا الفحص: مُعرّفه هو مستند حلقة من استيراد/موقع آخر
+  // (مو مكتوب أصلاً بذاكرة knownIds الخاصة بهذه المهمة)، وepisodeSourceMergeOp
+  // نفسها أعلاه ترجع null لو المصدر مضاف مسبقاً فلا حاجة لفحص إضافي هنا.
+  const newOps = ops.filter(op => op.kind === 'episode-merge' || !knownIds.has(op.id));
+  if (!newOps.length) return { categoryCount: 0, episodeCount: 0, mergedSourceCount: 0 };
   await commitOperations(newOps);
   for (const op of newOps) knownIds.add(op.id);
   const newCategoryCount = newOps.filter(op => op.kind === 'category').length;
   const newEpisodeCount = newOps.filter(op => op.kind === 'episode').length;
-  return { categoryCount: newCategoryCount, episodeCount: newEpisodeCount };
+  const newMergedSourceCount = newOps.filter(op => op.kind === 'episode-merge').length;
+  return { categoryCount: newCategoryCount, episodeCount: newEpisodeCount, mergedSourceCount: newMergedSourceCount };
 }
 
 async function runImport() {
@@ -572,6 +717,10 @@ async function runImport() {
 
   // لو محطوط، يتجاوز اكتشاف نمط المشاهدة التلقائي كلياً لكل هذا الاستيراد.
   const forcedWatchSuffix = watchExample ? deriveWatchSuffixFromExample(watchExample) : undefined;
+  // إعادة تحميل أقسام هذا النوع من Firestore بداية كل مهمة استيراد — تجنّباً
+  // لذاكرة مطابقة قديمة لو تغيّر شيء يدوياً بلوحة التحكم منذ آخر استيراد
+  // بنفس الجلسة (راجع loadExistingCategories/findExistingCategory).
+  existingCategoriesCache = null;
 
   try {
     localStorage.setItem(LAST_URL_KEY, url);
@@ -605,13 +754,19 @@ async function runImport() {
       const result = await importOneSeries(currentState.pages[currentState.seriesIndex], currentState.seriesIndex, contentType, parentCategoryId, forcedWatchSuffix);
       currentState.importedCategories += result.categoryCount;
       currentState.importedEpisodes += result.episodeCount;
+      // مهام محفوظة قبل إضافة هذا العدّاد لا تملكه أصلاً بذاكرتها المحفوظة.
+      currentState.importedMergedSources = (currentState.importedMergedSources || 0) + (result.mergedSourceCount || 0);
       currentState.doneSeries += 1;
       currentState.seriesIndex += 1;
       saveState();
-      updateProgress(`تم ${currentState.doneSeries}/${currentState.pages.length} — ${currentState.importedEpisodes} حلقة جديدة.`);
+      const mergedSuffix = currentState.importedMergedSources ? ` — ${currentState.importedMergedSources} مصدر إضافي لحلقات موجودة` : '';
+      updateProgress(`تم ${currentState.doneSeries}/${currentState.pages.length} — ${currentState.importedEpisodes} حلقة جديدة${mergedSuffix}.`);
     }
     currentState.completed = true; saveState();
-    updateProgress(`اكتمل الفحص: ${currentState.importedCategories} قسم و${currentState.importedEpisodes} حلقة جديدة فعلاً (ما تم تخطيه من المحتوى السابق لم تتم إعادة كتابته).`);
+    const mergedNote = currentState.importedMergedSources
+      ? ` و${currentState.importedMergedSources} مصدر إضافي أُضيف لحلقات موجودة مسبقاً (من موقع آخر لنفس العمل)`
+      : '';
+    updateProgress(`اكتمل الفحص: ${currentState.importedCategories} قسم و${currentState.importedEpisodes} حلقة جديدة فعلاً${mergedNote} (ما تم تخطيه من المحتوى السابق لم تتم إعادة كتابته).`);
     window.dispatchEvent(new CustomEvent('site-import-complete'));
   } catch (error) {
     if (error?.message === '__STOP__') {
