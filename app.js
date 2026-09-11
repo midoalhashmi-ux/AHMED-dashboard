@@ -1292,7 +1292,7 @@ categoriesBulkDelete.addEventListener('click', async () => {
   categoriesBulkDelete.disabled = true;
   try {
     const refs = [
-      ...allCategoryIds.map((categoryId) => doc(db, 'categories', categoryId)),
+      ...[...allCategoryIds].map((categoryId) => doc(db, 'categories', categoryId)),
       ...currentChannels
         .filter((channel) => categoryIdSet.has(channel.categoryId))
         .map((channel) => doc(db, 'channels', channel.id)),
