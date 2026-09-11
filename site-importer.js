@@ -44,8 +44,8 @@ let selectedParentLabel = '— بدون (قسم رئيسي مستقل) —';
 
 function freshState() {
   return {
-    version: 6, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0,
-    importedMergedSources: 0,
+    version: 7, pages: [], seriesIndex: 0, doneSeries: 0, importedEpisodes: 0, importedCategories: 0,
+    importedMergedSources: 0, reclassifiedCount: 0,
     startedAt: null, lastError: '', completed: false, knownIds: [],
     // بعض المواقع تعرض صفحة "معلومات الحلقة" بدون أي مصدر تشغيل، والمشاهدة
     // الفعلية بنفس الرابط + مقطع إضافي (مثلاً ".../see/"). يُكتشف مرة واحدة
@@ -237,24 +237,53 @@ function normalizeTitleForMatch(title) {
     .replace(/\s+/g, ' ');
 }
 
-// ذاكرة مؤقتة (لعمر المهمة الحالية فقط) لأقسام نوع محتوى واحد — تُجلب مرة
-// واحدة، وتُحدَّث محلياً كل ما أنشأنا قسماً جديداً بنفس هذا الاستيراد، بدل
-// استعلام Firestore لكل عمل على حدة.
-let existingCategoriesCache = null;
+// كشف نوع المحتوى الفعلي لكل عنصر على حدة — لصفحة قائمة مختلطة (أفلام
+// ومسلسلات وأنمي بنفس الرابط) بدل تصنيف كل شيء بالنوع الواحد المختار
+// بالنموذج بغض النظر عن حقيقته.
+//
+// فيلم مقابل عمل بحلقات: إشارة بنائية موثوقة تماماً — عنصر بلا مواسم
+// وبحلقة واحدة أو بلا حلقات (صفحة مشاهدة مباشرة) هو فيلم، بغض النظر عن
+// النوع المختار. نفحصها دائماً لأننا أصلاً نجلب هذه البيانات لكل عنصر.
+//
+// أنمي مقابل مسلسل: لا توجد إشارة بنائية موثوقة (الاثنان مواسم+حلقات) —
+// فقط كلمات دالة بالرابط/العنوان، وغيابها لا يعني أبداً "ليس أنمي" (أنمي
+// كثير بعناوين مترجمة عربياً بلا أي كلمة إنجليزية دالة). لذلك هذا الاتجاه
+// يُستخدم فقط للترقية لأنمي (حتى لو اختار المستخدم مسلسلات)، لا للتخفيض
+// منه — تخمين "ليس أنمي" من غياب كلمة غير موثوق بما يكفي ليُبنى عليه قرار.
+const ANIME_HINT_WORDS = ['anime', 'أنمي', 'انمي', 'animeworld', 'crunchyroll', 'manga', 'مانجا'];
+function looksLikeAnime(item) {
+  const text = `${item.url} ${item.title || ''}`.toLowerCase();
+  return ANIME_HINT_WORDS.some((word) => text.includes(word));
+}
+function guessContentType(item, collected, selectedType) {
+  if (selectedType === 'channels') return selectedType; // بث مباشر، بنية مختلفة تماماً — لا نلمسها
+  const hasEpisodicStructure = collected.seasons.length > 0 || collected.episodes.length > 1;
+  if (!hasEpisodicStructure) return 'movies';
+  if (looksLikeAnime(item)) return 'anime';
+  return selectedType === 'movies' ? 'series' : selectedType;
+}
+
+// ذاكرة مؤقتة (لعمر المهمة الحالية فقط) لأقسام كل نوع محتوى — تُجلب مرة
+// واحدة لكل نوع، وتُحدَّث محلياً كل ما أنشأنا قسماً جديداً بنفس هذا
+// الاستيراد، بدل استعلام Firestore لكل عمل على حدة. خانة منفصلة لكل نوع
+// (لا خانة واحدة) لأن صفحة قائمة مختلطة قد تُنتج أنواعاً مختلفة متتالية
+// (راجع guessContentType) — خانة واحدة كانت ستُفرَّغ وتُعاد تعبئتها من
+// Firestore بكل تبديل نوع بدل الاستفادة من الذاكرة فعلياً.
+let existingCategoriesCacheByType = new Map();
 async function loadExistingCategories(contentType) {
-  if (existingCategoriesCache && existingCategoriesCache.contentType === contentType) {
-    return existingCategoriesCache.list;
+  if (existingCategoriesCacheByType.has(contentType)) {
+    return existingCategoriesCacheByType.get(contentType);
   }
   const list = [];
   try {
     const snap = await getDocs(query(collection(db, 'categories'), where('contentType', '==', contentType)));
     snap.forEach(d => list.push({ id: d.id, title: d.data()?.title || '', parentId: d.data()?.parentId || null }));
   } catch (_) { /* أفضل جهد — عدم العثور على تطابق يعني إنشاء قسم جديد كالمعتاد */ }
-  existingCategoriesCache = { contentType, list };
+  existingCategoriesCacheByType.set(contentType, list);
   return list;
 }
-function rememberNewCategory(id, title, parentId) {
-  if (existingCategoriesCache) existingCategoriesCache.list.push({ id, title, parentId: parentId || null });
+function rememberNewCategory(contentType, id, title, parentId) {
+  existingCategoriesCacheByType.get(contentType)?.push({ id, title, parentId: parentId || null });
 }
 function findExistingCategory(list, parentId, title) {
   const norm = normalizeTitleForMatch(title);
@@ -613,18 +642,28 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
   // العمل غالبًا عنوانها SEO كامل يكرر اسم الموقع أو عبارات إضافية.
   const dataTitle = item.title || collected.title || 'بدون اسم';
   const thumbnail = item.thumbnail || collected.thumbnail || null;
-  const existingCategories = await loadExistingCategories(contentType);
+
+  // نوع المحتوى الفعلي لهذا العنصر تحديداً — راجع guessContentType أعلاه.
+  // لو صفحة القائمة نوع واحد فعلاً (الحالة الشائعة)، detectedType نفس
+  // contentType المختار دائماً ولا يتغيّر شيء. لو مختلفة (صفحة قائمة
+  // مختلطة)، القسم الوجهة المختار بالنموذج ينتمي لشجرة النوع الآخر أصلاً
+  // فلا معنى لوضع هذا العنصر بداخله — يُضاف كقسم رئيسي مستقل بنوعه
+  // الحقيقي بدل تصنيفه خطأً أو محاولة تخمين مكانه بشجرة لا يعرفها.
+  const detectedType = guessContentType(item, collected, contentType);
+  const reclassified = detectedType !== contentType;
+  const effectiveParentId = reclassified ? null : (parentCategoryId || null);
+  const existingCategories = await loadExistingCategories(detectedType);
 
   // نفس العمل مستورد مسبقاً (من موقع آخر على الأغلب) بنفس القسم الوجهة؟
   // نعيد استخدام قسمه بدل إنشاء نسخة مكررة كاملة — بدون لمس عنوانه/صورته
   // الحاليين (قد يكونا عُدِّلا يدوياً). حلقاته المطابقة تكتسب هذا الموقع
   // كمصدر إضافي بدل تكرارها (راجع episodeSourceMergeOp تحت).
-  const existingShow = findExistingCategory(existingCategories, parentCategoryId || null, dataTitle);
+  const existingShow = findExistingCategory(existingCategories, effectiveParentId, dataTitle);
   const showId = existingShow ? existingShow.id : hashId(`category|${item.url}`);
   const ops = existingShow
     ? []
-    : [categoryOp(showId, dataTitle, parentCategoryId || null, index + 1, thumbnail, contentType)];
-  if (!existingShow) rememberNewCategory(showId, dataTitle, parentCategoryId || null);
+    : [categoryOp(showId, dataTitle, effectiveParentId, index + 1, thumbnail, detectedType)];
+  if (!existingShow) rememberNewCategory(detectedType, showId, dataTitle, effectiveParentId);
   let episodeCount = 0; // عدّاد ترقيم احتياطي فقط لحلقة بلا رقم صريح
   let mergedSourceCount = 0;
 
@@ -653,8 +692,8 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
         ? existingSeason.id
         : hashId(`category|${item.url}|season|${season.url || season.title || si}`);
       if (seasonIsNew) {
-        ops.push(categoryOp(seasonId, seasonTitle, showId, si + 1, thumbnail, contentType));
-        rememberNewCategory(seasonId, seasonTitle, showId);
+        ops.push(categoryOp(seasonId, seasonTitle, showId, si + 1, thumbnail, detectedType));
+        rememberNewCategory(detectedType, seasonId, seasonTitle, showId);
       }
     }
     // مثال رابط حلقة يدوي (لو محطوط) يتخطّى التخمين التلقائي كلياً — يُطبَّق
@@ -689,13 +728,18 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
   // (مو مكتوب أصلاً بذاكرة knownIds الخاصة بهذه المهمة)، وepisodeSourceMergeOp
   // نفسها أعلاه ترجع null لو المصدر مضاف مسبقاً فلا حاجة لفحص إضافي هنا.
   const newOps = ops.filter(op => op.kind === 'episode-merge' || !knownIds.has(op.id));
-  if (!newOps.length) return { categoryCount: 0, episodeCount: 0, mergedSourceCount: 0 };
+  if (!newOps.length) return { categoryCount: 0, episodeCount: 0, mergedSourceCount: 0, reclassified: false };
   await commitOperations(newOps);
   for (const op of newOps) knownIds.add(op.id);
   const newCategoryCount = newOps.filter(op => op.kind === 'category').length;
   const newEpisodeCount = newOps.filter(op => op.kind === 'episode').length;
   const newMergedSourceCount = newOps.filter(op => op.kind === 'episode-merge').length;
-  return { categoryCount: newCategoryCount, episodeCount: newEpisodeCount, mergedSourceCount: newMergedSourceCount };
+  return {
+    categoryCount: newCategoryCount,
+    episodeCount: newEpisodeCount,
+    mergedSourceCount: newMergedSourceCount,
+    reclassified,
+  };
 }
 
 async function runImport() {
@@ -712,10 +756,10 @@ async function runImport() {
 
   // لو محطوط، يتجاوز اكتشاف نمط المشاهدة التلقائي كلياً لكل هذا الاستيراد.
   const forcedWatchSuffix = watchExample ? deriveWatchSuffixFromExample(watchExample) : undefined;
-  // إعادة تحميل أقسام هذا النوع من Firestore بداية كل مهمة استيراد — تجنّباً
+  // إعادة تحميل أقسام كل نوع من Firestore بداية كل مهمة استيراد — تجنّباً
   // لذاكرة مطابقة قديمة لو تغيّر شيء يدوياً بلوحة التحكم منذ آخر استيراد
   // بنفس الجلسة (راجع loadExistingCategories/findExistingCategory).
-  existingCategoriesCache = null;
+  existingCategoriesCacheByType = new Map();
 
   try {
     localStorage.setItem(LAST_URL_KEY, url);
@@ -751,6 +795,7 @@ async function runImport() {
       currentState.importedEpisodes += result.episodeCount;
       // مهام محفوظة قبل إضافة هذا العدّاد لا تملكه أصلاً بذاكرتها المحفوظة.
       currentState.importedMergedSources = (currentState.importedMergedSources || 0) + (result.mergedSourceCount || 0);
+      currentState.reclassifiedCount = (currentState.reclassifiedCount || 0) + (result.reclassified ? 1 : 0);
       currentState.doneSeries += 1;
       currentState.seriesIndex += 1;
       saveState();
@@ -761,7 +806,13 @@ async function runImport() {
     const mergedNote = currentState.importedMergedSources
       ? ` و${currentState.importedMergedSources} مصدر إضافي أُضيف لحلقات موجودة مسبقاً (من موقع آخر لنفس العمل)`
       : '';
-    updateProgress(`اكتمل الفحص: ${currentState.importedCategories} قسم و${currentState.importedEpisodes} حلقة جديدة فعلاً${mergedNote} (ما تم تخطيه من المحتوى السابق لم تتم إعادة كتابته).`);
+    // صفحة قائمة مختلطة (أفلام/مسلسلات/أنمي بنفس الرابط) — راجع
+    // guessContentType: عناصر صُنِّفت بنوع مختلف عمّا اخترته بالنموذج،
+    // وأُضيفت كقسم رئيسي مستقل بنوعها الصحيح بدل القسم الوجهة المختار.
+    const reclassifiedNote = currentState.reclassifiedCount
+      ? ` — تنبيه: ${currentState.reclassifiedCount} عنصر اكتُشف بنوع مختلف عن المختار (فيلم بلا حلقات، أو أنمي بكلمة دالة) وأُضيف كقسم رئيسي مستقل بنوعه الصحيح بدل داخل القسم الوجهة`
+      : '';
+    updateProgress(`اكتمل الفحص: ${currentState.importedCategories} قسم و${currentState.importedEpisodes} حلقة جديدة فعلاً${mergedNote} (ما تم تخطيه من المحتوى السابق لم تتم إعادة كتابته).${reclassifiedNote}`);
     window.dispatchEvent(new CustomEvent('site-import-complete'));
   } catch (error) {
     if (error?.message === '__STOP__') {
