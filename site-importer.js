@@ -773,7 +773,18 @@ async function discoverCatalog(startUrl, pagePattern) {
     if (stopRequested) throw new Error('__STOP__');
     seenPages.add(pageUrl);
     updateProgress(`جاري قراءة قائمة المحتوى… صفحة ${seenPages.size}`);
-    const data = await worker('/import/site', { action: 'catalog', url: pageUrl });
+    let data;
+    try {
+      data = await worker('/import/site', { action: 'catalog', url: pageUrl });
+    } catch (error) {
+      // ترقيم يدوي: صفحة مولَّدة (رقم 2 فأكثر) رجّعت خطأ (غالباً 404) —
+      // هذا أسلوب مواقع كثيرة (خصوصاً ووردبرس) للإشارة "لا توجد صفحة بعد
+      // هذي" بدل رابط "التالي" صريح أو صفحة فارغة بردّ 200. نعامله كنهاية
+      // طبيعية للترقيم بدل فشل المهمة كاملة — طالما هذي ليست أول صفحة
+      // (رابط المستخدم نفسه، لو فشل فهو خطأ حقيقي يستحق الإيقاف والتبليغ).
+      if (pagePattern && pageNum > 1) break;
+      throw error;
+    }
     let addedAny = false;
     for (const item of (data.series || [])) {
       if (item.url && !series.some(x => x.url === item.url)) { series.push(item); addedAny = true; }
