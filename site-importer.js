@@ -20,6 +20,18 @@ const LAST_WATCH_EXAMPLE_KEY = 'siteAutoImportLastWatchExample';
 const LAST_PAGE_EXAMPLE_KEY = 'siteAutoImportLastPageExample';
 const BATCH_SIZE = 450;
 const PAGE_LIMIT = 1000;
+// أقصى عدد صفحات حلقات لعمل واحد — أقل بكثير من PAGE_LIMIT (المستخدم
+// لصفحة القائمة الرئيسية اللي فعلاً ممكن يكون فيها مئات الصفحات). ما فيه
+// مسلسل واحد يحتاج فعلياً أكثر من هذا لصفحات قائمة حلقاته — لو صار،
+// الأرجح مصدر "الصفحة التالية" بموقع المصدر يلف على نفسه (رابط متغيّر
+// بدون نهاية فعلية)، فنوقف عند هذا الحد بدل ما نعلّق المهمة كاملة عليه
+// لساعات.
+const SERIES_PAGE_LIMIT = 60;
+// مهلة أقصى لكل طلب لووركر الاستيراد — بدونها طلب واحد عالق (شبكة، أو
+// الووركر نفسه معلّق بجلب صفحة المصدر) يوقف المهمة كاملة بلا أي رسالة
+// خطأ ولا إمكانية إيقاف حقيقية، لأن "إيقاف آمن" يُفحص فقط بين الطلبات لا
+// أثناء انتظار طلب واحد عالق.
+const WORKER_TIMEOUT_MS = 25000;
 
 let firebaseReady = false;
 let auth = null;
@@ -104,11 +116,24 @@ function getAdminKey() {
 
 async function worker(path, body) {
   const key = getAdminKey();
-  const response = await fetch(`${WORKER_BASE_URL}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-key': key },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(`${WORKER_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': key },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`انتهت مهلة الانتظار (${WORKER_TIMEOUT_MS / 1000} ثانية) بلا رد من الخادم — ${body?.url || path}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   const data = await response.json().catch(() => ({}));
   if (response.status === 401 || response.status === 403) {
     adminSyncSecret = '';
@@ -812,9 +837,14 @@ async function collectSeriesData(item) {
   let first = true;
   let title = '';
   let thumbnail = null;
-  while (pageUrl && !seen.has(pageUrl) && seen.size < PAGE_LIMIT) {
+  while (pageUrl && !seen.has(pageUrl) && seen.size < SERIES_PAGE_LIMIT) {
     if (stopRequested) throw new Error('__STOP__');
     seen.add(pageUrl);
+    // فقط من الصفحة الثانية فصاعداً — الصفحة الأولى مغطاة برسالة التقدّم
+    // اللي كتبها importOneSeries قبل هذا الاستدعاء أصلاً.
+    if (seen.size > 1) {
+      updateProgress(`${item.title || 'العمل الحالي'} — قراءة صفحة الحلقات ${seen.size}…`);
+    }
     const data = await worker('/import/site', { action: 'series', url: pageUrl, fallbackTitle: item.title, fallbackThumbnail: item.thumbnail });
     if (first) { title = data.title || ''; thumbnail = data.thumbnail || null; first = false; }
     for (const ep of (data.episodes || [])) if (!episodes.some(e => e.url === ep.url)) episodes.push(ep);
