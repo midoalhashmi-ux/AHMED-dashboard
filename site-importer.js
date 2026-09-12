@@ -42,6 +42,10 @@ try { adminSyncSecret = sessionStorage.getItem(SYNC_SECRET_STORAGE_KEY) || ''; }
 
 let running = false;
 let stopRequested = false;
+// طلب الووركر الحالي قيد الانتظار (لو فيه) — يسمح لزر «إيقاف آمن» بقطع
+// طلب عالق فوراً بدل انتظار مهلته (25 ثانية) أو أكثر لو تبويب المتصفح
+// بالخلفية أخّر تنفيذ مؤقّت القطع التلقائي (راجع worker() تحت).
+let activeAbortController = null;
 let currentState = freshState();
 let currentStateKey = '';
 // معرّفات Firestore (أقسام + حلقات) المكتوبة فعلياً من قبل لهذا الرابط.
@@ -117,6 +121,7 @@ function getAdminKey() {
 async function worker(path, body) {
   const key = getAdminKey();
   const controller = new AbortController();
+  activeAbortController = controller;
   const timeout = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
   let response;
   try {
@@ -128,11 +133,17 @@ async function worker(path, body) {
     });
   } catch (error) {
     if (error?.name === 'AbortError') {
+      // قُطع الطلب إما تلقائياً (مهلة 25 ثانية) أو يدوياً بزر «إيقاف آمن»
+      // (راجع مستمع الزر أدناه، يستدعي activeAbortController.abort() فوراً).
+      // التفريق بينهما بعلامة stopRequested — إيقاف يدوي يظهر كإيقاف آمن
+      // عادي، لا كخطأ مهلة مربك.
+      if (stopRequested) throw new Error('__STOP__');
       throw new Error(`انتهت مهلة الانتظار (${WORKER_TIMEOUT_MS / 1000} ثانية) بلا رد من الخادم — ${body?.url || path}`);
     }
     throw error;
   } finally {
     clearTimeout(timeout);
+    if (activeAbortController === controller) activeAbortController = null;
   }
   const data = await response.json().catch(() => ({}));
   if (response.status === 401 || response.status === 403) {
@@ -595,7 +606,13 @@ function createUI() {
   });
   card.querySelector('#site-import-start').addEventListener('click', () => runImport());
   card.querySelector('#site-import-close').addEventListener('click', () => card.classList.add('hidden'));
-  card.querySelector('#site-import-stop').addEventListener('click', () => { stopRequested = true; updateProgress('سيتم الإيقاف بعد اكتمال الدفعة الحالية…'); });
+  card.querySelector('#site-import-stop').addEventListener('click', () => {
+    stopRequested = true;
+    // يقطع أي طلب ووركر عالق حالياً فوراً بدل انتظار مهلته (25 ثانية)، أو
+    // أكثر بكثير لو تبويب المتصفح بالخلفية (راجع activeAbortController).
+    activeAbortController?.abort();
+    updateProgress('سيتم الإيقاف الآن…');
+  });
   card.querySelector('#site-import-refresh-parents').addEventListener('click', () => refreshParentPicker(typeSelect.value));
   card.querySelector('#site-import-parent-toggle').addEventListener('click', () => toggleParentPicker(typeSelect.value));
   card.querySelector('#site-import-parent-search').addEventListener('input', (e) => renderParentPicker(e.target.value));
