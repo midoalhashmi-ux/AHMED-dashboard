@@ -457,57 +457,71 @@ function createUI() {
       <h2>🌐 استيراد تلقائي من رابط موقع</h2>
       <p class="muted">الصق رابط صفحة قائمة الأعمال من أي موقع (وليس موقعاً واحداً بعينه) — يقرأ الأقسام والمواسم والحلقات تلقائياً ويحفظها في دفعات آمنة بدون تغيير المشغل أو مصادر HLS/API الحالية.</p>
     </div>
-    <div class="category-form" style="gap:12px">
-      <label>رابط صفحة القائمة
-        <input id="site-import-url" type="url" placeholder="https://example.com/anime-list/" />
-      </label>
-      <p id="site-import-known-hint" class="muted hidden" style="margin:-6px 0 0"></p>
-      <details id="site-import-known-sites-panel" style="border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:8px">
-        <summary>🌐 المواقع المعروفة (نوع مؤكَّد بدل التخمين)</summary>
-        <div id="site-import-known-list" style="display:flex;flex-direction:column;gap:6px;margin:10px 0"></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <input id="site-import-known-domain" type="text" placeholder="دومين الموقع، مثلاً: example.com" style="flex:1;min-width:160px" />
-          <select id="site-import-known-type">
+    <div class="site-import-form">
+      <fieldset class="source-settings-card">
+        <legend>🔗 رابط الاستيراد</legend>
+        <label>رابط صفحة القائمة
+          <input id="site-import-url" type="url" placeholder="https://example.com/anime-list/" />
+        </label>
+        <p id="site-import-known-hint" class="muted hidden" style="margin:-6px 0 0"></p>
+        <details id="site-import-known-sites-panel" class="source-headers">
+          <summary>🌐 المواقع المعروفة (نوع مؤكَّد بدل التخمين)</summary>
+          <div id="site-import-known-list" style="display:flex;flex-direction:column;gap:6px;margin:10px 0"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input id="site-import-known-domain" type="text" placeholder="دومين الموقع، مثلاً: example.com" style="flex:1;min-width:160px" />
+            <select id="site-import-known-type">
+              <option value="anime">🍥 أنمي</option>
+              <option value="series">📺 مسلسلات</option>
+              <option value="movies">🎬 أفلام</option>
+              <option value="channels">📺 قنوات</option>
+            </select>
+            <button type="button" id="site-import-known-add" class="secondary-button">+ إضافة</button>
+          </div>
+          <p class="muted" style="margin:6px 0 0">أضف أي موقع تستورد منه بانتظام مع نوعه الحقيقي — الاستيراد يستخدم هذا النوع بيقين لأي رابط من نفس الدومين بدل تخمينه تلقائياً، ويملأ حقل «نوع المحتوى» تحت هذا تلقائياً عند لصق رابط دومين معروف.</p>
+        </details>
+      </fieldset>
+
+      <fieldset class="source-settings-card">
+        <legend>🎯 نوع المحتوى والقسم الوجهة</legend>
+        <label>نوع المحتوى
+          <select id="site-import-type">
             <option value="anime">🍥 أنمي</option>
             <option value="series">📺 مسلسلات</option>
             <option value="movies">🎬 أفلام</option>
             <option value="channels">📺 قنوات</option>
           </select>
-          <button type="button" id="site-import-known-add" class="secondary-button">+ إضافة</button>
+        </label>
+        <label>القسم الوجهة <span class="optional-label">اختياري</span></label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button type="button" id="site-import-parent-toggle" class="secondary-button" style="flex:1;text-align:right">— بدون (قسم رئيسي مستقل) —</button>
+          <button type="button" id="site-import-refresh-parents" class="secondary-button" title="تحديث القائمة">🔄</button>
         </div>
-        <p class="muted" style="margin:6px 0 0">أضف أي موقع تستورد منه بانتظام مع نوعه الحقيقي — الاستيراد يستخدم هذا النوع بيقين لأي رابط من نفس الدومين بدل تخمينه تلقائياً، ويملأ حقل «نوع المحتوى» تحت هذا تلقائياً عند لصق رابط دومين معروف.</p>
+        <div id="site-import-parent-panel" class="hidden source-headers">
+          <input id="site-import-parent-search" type="text" placeholder="ابحث عن قسم بالاسم…" style="width:100%;margin-bottom:8px;box-sizing:border-box" />
+          <div id="site-import-parent-breadcrumb" class="muted" style="margin-bottom:6px;font-size:0.85em"></div>
+          <div id="site-import-parent-list" style="max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:4px"></div>
+        </div>
+        <p class="muted" style="margin:8px 0 0">اتركه فارغاً ليضيف كل عمل كقسم رئيسي مستقل، أو تصفّح/ابحث عن أي قسم موجود (بأي مستوى) — أنشئه أولاً بزر «+ إضافة» ← «📁 قسم» لو ما كان موجوداً — ليضيف كل الأعمال المستورَدة بداخله.</p>
+      </fieldset>
+
+      <details class="source-headers">
+        <summary>⚙️ رابط حلقة مثال <span class="optional-label">اختياري</span></summary>
+        <label>مثال رابط حلقة تعمل فعلياً
+          <input id="site-import-watch-example" type="url" placeholder="https://example.com/watch/episodes/serie-x-season-1-episode-2/see/" />
+        </label>
+        <p class="muted" style="margin:0">اتركه فارغاً ليكتشف الكود نمط رابط المشاهدة تلقائياً لكل عمل على حدة (الافتراضي). لو حطيته، يُستخدم مباشرة لكل حلقات كل الأعمال بهذا الاستيراد بدل التخمين — افتح أي حلقة بالموقع فعلياً وتأكد إنها تشتغل، والصق رابطها هنا كما هو.</p>
       </details>
-      <label>نوع المحتوى
-        <select id="site-import-type">
-          <option value="anime">🍥 أنمي</option>
-          <option value="series">📺 مسلسلات</option>
-          <option value="movies">🎬 أفلام</option>
-          <option value="channels">📺 قنوات</option>
-        </select>
-      </label>
-      <label>القسم الوجهة <span class="optional-label">اختياري</span></label>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button type="button" id="site-import-parent-toggle" class="secondary-button" style="flex:1;text-align:right">— بدون (قسم رئيسي مستقل) —</button>
-        <button type="button" id="site-import-refresh-parents" class="secondary-button" title="تحديث القائمة">🔄</button>
+
+      <div class="site-import-actions">
+        <div id="site-import-progress" class="form-message" role="status">جاهز.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" id="site-import-start">بدء / استئناف</button>
+          <button type="button" id="site-import-stop" class="secondary-button">إيقاف آمن</button>
+          <button type="button" id="site-import-reset" class="secondary-button">إعادة ضبط المهمة</button>
+          <button type="button" id="site-import-close" class="secondary-button">إغلاق</button>
+        </div>
+        <p class="muted" style="margin:0">الإيقاف لا يحذف أي بيانات؛ يمكن استئناف المهمة لاحقاً. بعد اكتمال المهمة، ضغط «بدء / استئناف» مرة ثانية (مثلاً بعد يوم) يتحقق من الموقع من جديد لكنه يتخطى كل عمل مستورد سابقاً دون تغيير ويكتب فقط الحلقات الجديدة فعلاً. لكل رابط مهمة مستقلة، فتغيير الرابط لا يؤثر على تقدّم المهام الأخرى.</p>
       </div>
-      <div id="site-import-parent-panel" class="hidden" style="border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:8px;margin-top:-6px">
-        <input id="site-import-parent-search" type="text" placeholder="ابحث عن قسم بالاسم…" style="width:100%;margin-bottom:8px;box-sizing:border-box" />
-        <div id="site-import-parent-breadcrumb" class="muted" style="margin-bottom:6px;font-size:0.85em"></div>
-        <div id="site-import-parent-list" style="max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:4px"></div>
-      </div>
-      <p class="muted" style="margin:0">اتركه فارغاً ليضيف كل عمل كقسم رئيسي مستقل، أو تصفّح/ابحث عن أي قسم موجود (بأي مستوى) — أنشئه أولاً بزر «+ إضافة» ← «📁 قسم» لو ما كان موجوداً — ليضيف كل الأعمال المستورَدة بداخله.</p>
-      <label>مثال رابط حلقة تعمل فعلياً <span class="optional-label">اختياري</span>
-        <input id="site-import-watch-example" type="url" placeholder="https://example.com/watch/episodes/serie-x-season-1-episode-2/see/" />
-      </label>
-      <p class="muted" style="margin:0">اتركه فارغاً ليكتشف الكود نمط رابط المشاهدة تلقائياً لكل عمل على حدة (الافتراضي). لو حطيته، يُستخدم مباشرة لكل حلقات كل الأعمال بهذا الاستيراد بدل التخمين — افتح أي حلقة بالموقع فعلياً وتأكد إنها تشتغل، والصق رابطها هنا كما هو.</p>
-      <div id="site-import-progress" class="form-message" role="status">جاهز.</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button type="button" id="site-import-start">بدء / استئناف</button>
-        <button type="button" id="site-import-stop" class="secondary-button">إيقاف آمن</button>
-        <button type="button" id="site-import-reset" class="secondary-button">إعادة ضبط المهمة</button>
-        <button type="button" id="site-import-close" class="secondary-button">إغلاق</button>
-      </div>
-      <p class="muted" style="margin:0">الإيقاف لا يحذف أي بيانات؛ يمكن استئناف المهمة لاحقاً. بعد اكتمال المهمة، ضغط «بدء / استئناف» مرة ثانية (مثلاً بعد يوم) يتحقق من الموقع من جديد لكنه يتخطى كل عمل مستورد سابقاً دون تغيير ويكتب فقط الحلقات الجديدة فعلاً. لكل رابط مهمة مستقلة، فتغيير الرابط لا يؤثر على تقدّم المهام الأخرى.</p>
     </div>`;
   const anchor = document.querySelector('#bulk-form-card') || document.querySelector('#category-form-card');
   anchor?.parentElement?.insertBefore(card, anchor);

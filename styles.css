@@ -294,6 +294,13 @@ form button { width: 100%; margin-top: 14px; }
 
 .marquee-form { display: block; margin: 0; }
 
+/* استيراد تلقائي من رابط موقع — أقسام رأسية واضحة بدل شبكة العمودين
+   العامة لـ .category-form (كانت تتسبب بترتيب أزواج غير مترابطة). */
+.site-import-form { display: flex; flex-direction: column; gap: 18px; margin: 0; }
+.site-import-form fieldset > label:first-of-type,
+.site-import-form details > label:first-of-type { margin-top: 0; }
+.site-import-actions { display: flex; flex-direction: column; gap: 10px; padding-top: 16px; border-top: 1px solid var(--border); }
+
 .form-card-actions, .form-actions { grid-column: 1 / -1; display: flex; gap: 10px; margin-top: 4px; }
 .form-card-actions button, .form-actions button { width: auto; flex: 1; }
 
