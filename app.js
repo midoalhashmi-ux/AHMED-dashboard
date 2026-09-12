@@ -292,6 +292,10 @@ function showCategories(categories) {
   categoriesLoading.classList.add('hidden');
   categoriesError.classList.add('hidden');
   renderCurrentCategoryView();
+  // أزرار الشاشة الرئيسية تعرض أسماء الأقسام المرتبطة بها وتقدّم قائمة
+  // الأقسام الرئيسية عند الإضافة — يجب تحديثها كلما تغيّرت الأقسام.
+  renderHomeButtonsList();
+  populateHomeButtonTargetOptions();
 }
 
 function closeAllFormCards() {
@@ -1267,6 +1271,150 @@ legalForm?.addEventListener('submit', async (event) => {
 });
 
 // ==========================================================================
+// أزرار الشاشة الرئيسية لتطبيق المحتوى (settings/homeButtons) — كل زر
+// إما يفتح شجرة نوع محتوى كامل (كالسابق: أفلام/مسلسلات/أنمي) أو قسماً
+// رئيسياً محدداً مباشرة. القيم هنا (id الأيقونة، linkType) يجب أن تطابق
+// حرفياً BinSheikh/lib/core/models/home_button_model.dart.
+// ==========================================================================
+const HOME_BUTTON_ICON_LABELS = {
+  movie: '🎬 فيلم', tv: '📺 مسلسل', anime: '🍥 أنمي', channels: '📡 قنوات',
+  sports: '⚽ رياضة', kids: '🧸 أطفال', documentary: '🌍 وثائقي', music: '🎵 موسيقى',
+  game: '🎮 ألعاب', star: '⭐ نجمة', folder: '📁 عام',
+};
+const HOME_BUTTON_CONTENT_TYPE_LABELS = {
+  movies: '🎬 أفلام', series: '📺 مسلسلات', anime: '🍥 أنمي', channels: '📡 قنوات',
+};
+const DEFAULT_HOME_BUTTONS = [
+  { id: 'movies', label: 'الأفلام', icon: 'movie', linkType: 'contentType', contentType: 'movies' },
+  { id: 'series', label: 'المسلسلات', icon: 'tv', linkType: 'contentType', contentType: 'series' },
+  { id: 'anime', label: 'الأنمي', icon: 'anime', linkType: 'contentType', contentType: 'anime' },
+];
+let homeButtons = [];
+
+async function loadHomeButtons() {
+  try {
+    const snapshot = await getDoc(doc(db, 'settings', 'homeButtons'));
+    const data = snapshot.data();
+    homeButtons = Array.isArray(data?.buttons) && data.buttons.length
+      ? data.buttons
+      : DEFAULT_HOME_BUTTONS.slice();
+  } catch (_) {
+    homeButtons = DEFAULT_HOME_BUTTONS.slice();
+  }
+  renderHomeButtonsList();
+  populateHomeButtonTargetOptions();
+}
+
+function homeButtonTargetDescription(button) {
+  if (button.linkType === 'category') {
+    const category = currentCategories.find((c) => c.id === button.categoryId);
+    return category ? `قسم: ${category.title}` : 'قسم محذوف — لن يعمل هذا الزر';
+  }
+  return HOME_BUTTON_CONTENT_TYPE_LABELS[button.contentType] || button.contentType || '';
+}
+
+function renderHomeButtonsList() {
+  const list = document.querySelector('#home-buttons-list');
+  if (!list) return;
+  if (!homeButtons.length) {
+    list.innerHTML = '<p class="muted" style="margin:0">لا أزرار — سيظهر التطبيق بالأزرار الافتراضية (أفلام/مسلسلات/أنمي).</p>';
+    return;
+  }
+  list.innerHTML = homeButtons.map((button, index) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid rgba(255,255,255,0.12);border-radius:8px">
+      <span>${HOME_BUTTON_ICON_LABELS[button.icon] || '📁'}</span>
+      <span style="flex:1"><strong>${button.label}</strong><span class="muted"> — ${homeButtonTargetDescription(button)}</span></span>
+      <button type="button" class="secondary-button" data-home-button-up="${index}" ${index === 0 ? 'disabled' : ''}>▲</button>
+      <button type="button" class="secondary-button" data-home-button-down="${index}" ${index === homeButtons.length - 1 ? 'disabled' : ''}>▼</button>
+      <button type="button" class="secondary-button" data-home-button-remove="${index}">🗑</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('[data-home-button-up]').forEach((btn) => {
+    btn.addEventListener('click', () => moveHomeButton(Number(btn.dataset.homeButtonUp), -1));
+  });
+  list.querySelectorAll('[data-home-button-down]').forEach((btn) => {
+    btn.addEventListener('click', () => moveHomeButton(Number(btn.dataset.homeButtonDown), 1));
+  });
+  list.querySelectorAll('[data-home-button-remove]').forEach((btn) => {
+    btn.addEventListener('click', () => removeHomeButton(Number(btn.dataset.homeButtonRemove)));
+  });
+}
+
+async function saveHomeButtons() {
+  const message = document.querySelector('#home-buttons-message');
+  try {
+    await setDoc(doc(db, 'settings', 'homeButtons'), {
+      buttons: homeButtons,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    if (message) { message.classList.remove('error'); message.textContent = 'تم الحفظ — يظهر فوراً في التطبيق.'; }
+  } catch (_) {
+    if (message) { message.classList.add('error'); message.textContent = 'تعذر الحفظ. تحقق من قواعد Firestore.'; }
+  }
+}
+
+function moveHomeButton(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= homeButtons.length) return;
+  const [item] = homeButtons.splice(index, 1);
+  homeButtons.splice(target, 0, item);
+  renderHomeButtonsList();
+  saveHomeButtons();
+}
+
+function removeHomeButton(index) {
+  homeButtons.splice(index, 1);
+  renderHomeButtonsList();
+  saveHomeButtons();
+}
+
+function populateHomeButtonTargetOptions() {
+  const targetTypeSelect = document.querySelector('#home-button-target-type');
+  const targetValueSelect = document.querySelector('#home-button-target-value');
+  const targetValueLabel = document.querySelector('#home-button-target-value-label');
+  if (!targetTypeSelect || !targetValueSelect) return;
+  if (targetTypeSelect.value === 'category') {
+    if (targetValueLabel) targetValueLabel.textContent = 'القسم';
+    const roots = currentCategories.filter((c) => !c.parentId);
+    targetValueSelect.innerHTML = roots.length
+      ? roots.map((c) => `<option value="${c.id}">${c.title}</option>`).join('')
+      : '<option value="">لا أقسام رئيسية بعد</option>';
+  } else {
+    if (targetValueLabel) targetValueLabel.textContent = 'نوع المحتوى';
+    targetValueSelect.innerHTML = Object.entries(HOME_BUTTON_CONTENT_TYPE_LABELS)
+      .map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+  }
+}
+
+document.querySelector('#home-button-target-type')?.addEventListener('change', populateHomeButtonTargetOptions);
+
+document.querySelector('#home-button-add')?.addEventListener('click', () => {
+  const message = document.querySelector('#home-buttons-message');
+  const labelInput = document.querySelector('#home-button-label');
+  const label = labelInput.value.trim();
+  const icon = document.querySelector('#home-button-icon').value;
+  const targetType = document.querySelector('#home-button-target-type').value;
+  const targetValue = document.querySelector('#home-button-target-value').value;
+  if (message) message.classList.remove('error');
+  if (!label) {
+    if (message) { message.classList.add('error'); message.textContent = 'اكتب نص الزر أولاً.'; }
+    return;
+  }
+  if (!targetValue) {
+    if (message) { message.classList.add('error'); message.textContent = 'اختر وجهة صالحة للزر.'; }
+    return;
+  }
+  const button = targetType === 'category'
+    ? { id: `cat_${targetValue}_${Date.now()}`, label, icon, linkType: 'category', categoryId: targetValue }
+    : { id: `type_${targetValue}_${Date.now()}`, label, icon, linkType: 'contentType', contentType: targetValue };
+  homeButtons.push(button);
+  labelInput.value = '';
+  if (message) message.textContent = '';
+  renderHomeButtonsList();
+  saveHomeButtons();
+});
+
+// ==========================================================================
 // الإعلانات — أكواد الشبكات ومفتاح التشغيل/الإيقاف (settings/ads)
 // ==========================================================================
 async function loadAdsSettings() {
@@ -1338,6 +1486,7 @@ onAuthStateChanged(auth, (user) => {
     loadLegalSettings();
     loadAdsSettings();
     loadStats();
+    loadHomeButtons();
     return;
   }
   showView('login');

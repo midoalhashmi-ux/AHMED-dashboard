@@ -335,6 +335,44 @@
               <button type="submit">حفظ النصوص</button>
             </form>
           </section>
+          <section class="card category-form-card">
+            <div>
+              <h2>أزرار الشاشة الرئيسية</h2>
+              <p class="muted">أول شاشة يراها المستخدم عند فتح تطبيق المحتوى — أضف زراً لأي نوع محتوى أو لقسم رئيسي محدد، ورتّبها كما تريد. تملأ كل الأزرار الشاشة بالتساوي مهما كان عددها.</p>
+            </div>
+            <div id="home-buttons-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px"></div>
+            <div class="category-form" style="gap:12px">
+              <label>نص الزر
+                <input id="home-button-label" type="text" placeholder="مثلاً: الأفلام" maxlength="40" />
+              </label>
+              <label>الأيقونة
+                <select id="home-button-icon">
+                  <option value="movie">🎬 فيلم</option>
+                  <option value="tv">📺 مسلسل</option>
+                  <option value="anime">🍥 أنمي</option>
+                  <option value="channels">📡 قنوات</option>
+                  <option value="sports">⚽ رياضة</option>
+                  <option value="kids">🧸 أطفال</option>
+                  <option value="documentary">🌍 وثائقي</option>
+                  <option value="music">🎵 موسيقى</option>
+                  <option value="game">🎮 ألعاب</option>
+                  <option value="star">⭐ نجمة</option>
+                  <option value="folder">📁 عام</option>
+                </select>
+              </label>
+              <label>وجهة الزر
+                <select id="home-button-target-type">
+                  <option value="contentType">نوع محتوى كامل (يفتح شجرة الأقسام)</option>
+                  <option value="category">قسم رئيسي محدد (يفتح مباشرة)</option>
+                </select>
+              </label>
+              <label><span id="home-button-target-value-label">نوع المحتوى</span>
+                <select id="home-button-target-value"></select>
+              </label>
+              <p id="home-buttons-message" class="form-message"></p>
+              <button type="button" id="home-button-add" class="secondary-button">+ إضافة زر</button>
+            </div>
+          </section>
         </section>
 
         <section id="player-settings-panel" class="admin-panel hidden" data-group="player">
