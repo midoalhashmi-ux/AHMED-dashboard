@@ -841,12 +841,14 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
   // كمصدر إضافي بدل تكرارها (راجع episodeSourceMergeOp تحت).
   const existingShow = findExistingCategory(existingCategories, effectiveParentId, dataTitle);
   const showId = existingShow ? existingShow.id : hashId(`category|${item.url}`);
-  const ops = existingShow
-    ? []
-    : [categoryOp(showId, dataTitle, effectiveParentId, index + 1, thumbnail, detectedType)];
-  if (!existingShow) rememberNewCategory(detectedType, showId, dataTitle, effectiveParentId);
+  const ops = [];
   let episodeCount = 0; // عدّاد ترقيم احتياطي فقط لحلقة بلا رقم صريح
   let mergedSourceCount = 0;
+  // يصير true أول ما أي موسم يكتب شيئاً فعلياً (حلقة جديدة أو مصدر مدمج) —
+  // لو بقيت false للنهاية (كل المواسم بلا حلقات، أو موسم واحد بلا اسم
+  // بلا حلقات) لا يُنشأ لا العمل ولا أي موسم منه إطلاقاً. راجع الشرحين
+  // أسفل — هذا بالضبط ما يمنع إضافة مسلسل/موسم فارغ بلا حلقات حقيقية.
+  let showHasAnyContent = false;
 
   const seasonEntries = collected.seasons.length
     ? collected.seasons
@@ -859,6 +861,12 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
       const seasonData = await collectSeriesData({ url: season.url, title: season.title, thumbnail });
       seasonEpisodes = seasonData.episodes;
     }
+    // موسم بلا أي حلقة إطلاقاً (صفحة موسم معطوبة مؤقتاً، أو قسم فرعي بلا
+    // محتوى فعلي بالموقع المصدر) — تخطّيه كلياً بدل إنشائه فارغاً. لا يمسّ
+    // هذا موسماً/عملاً موجوداً مسبقاً بلوحة التحكم، فقط يمنع إنشاء واحد
+    // جديد فارغ.
+    if (!seasonEpisodes.length) continue;
+
     const hasSeasonName = collected.seasons.length > 0;
     const seasonTitle = season.title || `الموسم ${si + 1}`;
     let seasonId;
@@ -872,20 +880,17 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
       seasonId = existingSeason
         ? existingSeason.id
         : hashId(`category|${item.url}|season|${season.url || season.title || si}`);
-      if (seasonIsNew) {
-        ops.push(categoryOp(seasonId, seasonTitle, showId, si + 1, thumbnail, detectedType));
-        rememberNewCategory(detectedType, seasonId, seasonTitle, showId);
-      }
     }
     // مثال رابط حلقة يدوي (لو محطوط) يتخطّى التخمين التلقائي كلياً — يُطبَّق
     // نفسه على كل الأعمال بهذا الاستيراد بدل اكتشاف نمط مستقل لكل عمل.
     const watchSuffix = forcedWatchSuffix !== undefined
       ? forcedWatchSuffix
-      : (seasonEpisodes.length ? await ensureWatchSuffix(item.url, seasonEpisodes[0].url) : '');
+      : await ensureWatchSuffix(item.url, seasonEpisodes[0].url);
     // موسم/عمل جديد كلياً بهذا الاستيراد لا يحتاج فحص تكرار — لا يوجد أي
     // حلقة تحته أصلاً بعد. الموسم الموجود مسبقاً (من موقع آخر) فقط يحتاج
     // جلب حلقاته الحالية لمطابقتها بالحلقات الجديدة بدل تكرارها.
     const existingEpisodes = seasonIsNew ? [] : await loadExistingEpisodes(seasonId);
+    const seasonOps = [];
     for (const ep of seasonEpisodes) {
       if (!ep.url) continue;
       const n = Number.isFinite(ep.episodeNumber) ? ep.episodeNumber : episodeCount + 1;
@@ -894,13 +899,28 @@ async function importOneSeries(item, index, contentType, parentCategoryId, force
       const match = existingEpisodes.length ? findExistingEpisode(existingEpisodes, n, title) : null;
       if (match) {
         const mergeOp = episodeSourceMergeOp(match, finalUrl);
-        if (mergeOp) { ops.push(mergeOp); mergedSourceCount += 1; }
+        if (mergeOp) { seasonOps.push(mergeOp); mergedSourceCount += 1; }
       } else {
         const id = hashId(`episode|${seasonId}|${ep.url}`);
-        ops.push(episodeOp(id, seasonId, title, finalUrl, n, ep.thumbnail || thumbnail));
+        seasonOps.push(episodeOp(id, seasonId, title, finalUrl, n, ep.thumbnail || thumbnail));
       }
       episodeCount += 1;
     }
+    // كل حلقات هذا الموسم بلا رابط صالح، أو كلها مطابقة لمصدر موجود مسبقاً
+    // فعلاً (لا شيء جديد لدمجه) — لا شيء يُكتب لهذا الموسم فلا معنى لإنشائه
+    // لو كان جديداً.
+    if (!seasonOps.length) continue;
+    showHasAnyContent = true;
+    if (hasSeasonName && seasonIsNew) {
+      ops.push(categoryOp(seasonId, seasonTitle, showId, si + 1, thumbnail, detectedType));
+      rememberNewCategory(detectedType, seasonId, seasonTitle, showId);
+    }
+    ops.push(...seasonOps);
+  }
+  if (!showHasAnyContent) return { categoryCount: 0, episodeCount: 0, mergedSourceCount: 0, reclassified: false };
+  if (!existingShow) {
+    ops.unshift(categoryOp(showId, dataTitle, effectiveParentId, index + 1, thumbnail, detectedType));
+    rememberNewCategory(detectedType, showId, dataTitle, effectiveParentId);
   }
   // تخطّي كل ما سبق كتابته فعلياً — هذا ما يمنع إعادة استهلاك الوقت وحصة
   // Firestore على أعمال كاملة لم يتغيّر فيها شيء؛ لازم نفتح صفحة العمل
