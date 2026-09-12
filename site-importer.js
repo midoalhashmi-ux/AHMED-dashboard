@@ -17,6 +17,7 @@ const LAST_URL_KEY = 'siteAutoImportLastUrl';
 const LAST_TYPE_KEY = 'siteAutoImportLastType';
 const LAST_PARENT_KEY = 'siteAutoImportLastParent';
 const LAST_WATCH_EXAMPLE_KEY = 'siteAutoImportLastWatchExample';
+const LAST_PAGE_EXAMPLE_KEY = 'siteAutoImportLastPageExample';
 const BATCH_SIZE = 450;
 const PAGE_LIMIT = 1000;
 
@@ -163,6 +164,32 @@ function deriveWatchSuffixFromExample(exampleUrl) {
     if (!parts.length) return '';
     return `/${parts[parts.length - 1]}/`;
   } catch (_) { return ''; }
+}
+
+// بعض المواقع لا تضع أي رابط "الصفحة التالية" قابل للاكتشاف تلقائياً بصفحة
+// القائمة (رابط مخفي بجافاسكريبت، أو نمط ترقيم غير معتاد)، فيتوقف
+// discoverCatalog بعد الصفحة الأولى فقط رغم وجود صفحات أخرى فعلياً. لو
+// المستخدم حطّ "رابط الصفحة الثانية" يدوياً، نقارنه برابط الصفحة الأولى
+// (المدخل بالنموذج) لاستخراج نمط الترقيم (الفرق الوحيد المتوقع رقم الصفحة
+// نفسه، زي ".../page/2/" مقابل ".../page/3/")، ثم نولّد روابط الصفحات
+// التالية مباشرة بدل انتظار اكتشافها من HTML الموقع.
+function derivePageUrlPattern(startUrl, exampleUrl) {
+  try {
+    const trimSlash = (s) => (s.endsWith('/') ? s.slice(0, -1) : s);
+    const base = trimSlash(startUrl);
+    const example = trimSlash(exampleUrl);
+    if (!example.startsWith(base) || example === base) return null;
+    const suffix = example.slice(base.length); // مثلاً "/page/2"
+    const match = suffix.match(/\d+(?!.*\d)/); // آخر رقم بالمقطع المتبقي (رقم الصفحة)
+    if (!match) return null;
+    const digits = match[0];
+    const idx = suffix.lastIndexOf(digits);
+    const template = suffix.slice(0, idx) + '{page}' + suffix.slice(idx + digits.length);
+    return { base, template };
+  } catch (_) { return null; }
+}
+function pageUrlFor(pattern, pageNum) {
+  return `${pattern.base}${pattern.template.replace('{page}', String(pageNum))}/`;
 }
 
 async function commitOperations(ops) {
@@ -505,8 +532,12 @@ function createUI() {
       </fieldset>
 
       <details class="source-headers">
-        <summary>⚙️ رابط حلقة مثال <span class="optional-label">اختياري</span></summary>
-        <label>مثال رابط حلقة تعمل فعلياً
+        <summary>⚙️ أمثلة روابط لتحسين الدقة <span class="optional-label">اختياري</span></summary>
+        <label>رابط الصفحة الثانية من القائمة
+          <input id="site-import-page-example" type="url" placeholder="https://example.com/category/name/page/2/" />
+        </label>
+        <p class="muted" style="margin:0">القسم اللي له عدة صفحات (زر «التالي» أو أرقام صفحات أسفل القائمة) — لو الاستيراد يجلب الصفحة الأولى فقط ويتوقف، افتح صفحة رقم 2 من نفس القسم بالموقع والصق رابطها هنا كما هو. يُستخرج منه نمط الترقيم (مثلاً «page/2/») ويُستخدم لتوليد بقية الصفحات مباشرة بدل انتظار اكتشافها تلقائياً من الموقع.</p>
+        <label style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">مثال رابط حلقة تعمل فعلياً
           <input id="site-import-watch-example" type="url" placeholder="https://example.com/watch/episodes/serie-x-season-1-episode-2/see/" />
         </label>
         <p class="muted" style="margin:0">اتركه فارغاً ليكتشف الكود نمط رابط المشاهدة تلقائياً لكل عمل على حدة (الافتراضي). لو حطيته، يُستخدم مباشرة لكل حلقات كل الأعمال بهذا الاستيراد بدل التخمين — افتح أي حلقة بالموقع فعلياً وتأكد إنها تشتغل، والصق رابطها هنا كما هو.</p>
@@ -565,9 +596,11 @@ function createUI() {
     const lastUrl = localStorage.getItem(LAST_URL_KEY) || '';
     const lastType = localStorage.getItem(LAST_TYPE_KEY) || 'anime';
     const lastWatchExample = localStorage.getItem(LAST_WATCH_EXAMPLE_KEY) || '';
+    const lastPageExample = localStorage.getItem(LAST_PAGE_EXAMPLE_KEY) || '';
     urlInput.value = lastUrl;
     typeSelect.value = lastType;
     card.querySelector('#site-import-watch-example').value = lastWatchExample;
+    card.querySelector('#site-import-page-example').value = lastPageExample;
     if (lastUrl) {
       currentStateKey = stateKeyFor(lastUrl);
       currentState = loadState(currentStateKey);
@@ -731,19 +764,30 @@ function openImporter() {
   if (typeSelect) refreshParentPicker(typeSelect.value);
 }
 
-async function discoverCatalog(startUrl) {
+async function discoverCatalog(startUrl, pagePattern) {
   const series = [];
   const seenPages = new Set();
   let pageUrl = startUrl;
+  let pageNum = 1;
   while (pageUrl && !seenPages.has(pageUrl) && seenPages.size < PAGE_LIMIT) {
     if (stopRequested) throw new Error('__STOP__');
     seenPages.add(pageUrl);
     updateProgress(`جاري قراءة قائمة المحتوى… صفحة ${seenPages.size}`);
     const data = await worker('/import/site', { action: 'catalog', url: pageUrl });
+    let addedAny = false;
     for (const item of (data.series || [])) {
-      if (item.url && !series.some(x => x.url === item.url)) series.push(item);
+      if (item.url && !series.some(x => x.url === item.url)) { series.push(item); addedAny = true; }
     }
-    pageUrl = data.nextPageUrl || '';
+    if (pagePattern) {
+      // ترقيم يدوي: نتوقف فقط لما صفحة مولَّدة ترجع بلا عناصر جديدة فعلاً
+      // (سواء فارغة كلياً، أو موقع أعاد توجيهها لنفس محتوى صفحة سابقة) —
+      // بدل الاعتماد على "الصفحة التالية" المكتشفة تلقائياً من HTML الموقع.
+      if (!addedAny) break;
+      pageNum += 1;
+      pageUrl = pageUrlFor(pagePattern, pageNum);
+    } else {
+      pageUrl = data.nextPageUrl || '';
+    }
   }
   if (!series.length) throw new Error('لم يتم العثور على أي عناصر في صفحة القائمة. تأكد من صحة الرابط.');
   return series;
@@ -886,13 +930,19 @@ async function runImport() {
   const contentType = card.querySelector('#site-import-type').value;
   const parentCategoryId = selectedParentId || '';
   const watchExample = card.querySelector('#site-import-watch-example').value.trim();
+  const pageExample = card.querySelector('#site-import-page-example').value.trim();
   if (!isValidHttpUrl(url)) { updateProgress('أدخل رابط صفحة القائمة أولاً (يبدأ بـ http:// أو https://).'); return; }
   if (!firebaseReady || !auth || !db) { updateProgress('تعذر الاتصال بخدمة لوحة التحكم. أعد تحميل الصفحة وحاول مرة أخرى.'); return; }
   if (!auth.currentUser) { updateProgress('سجّل الدخول إلى لوحة التحكم أولاً.'); return; }
   if (watchExample && !isValidHttpUrl(watchExample)) { updateProgress('رابط مثال الحلقة غير صالح — امسحه أو صحّحه.'); return; }
+  if (pageExample && !isValidHttpUrl(pageExample)) { updateProgress('رابط مثال الصفحة الثانية غير صالح — امسحه أو صحّحه.'); return; }
 
   // لو محطوط، يتجاوز اكتشاف نمط المشاهدة التلقائي كلياً لكل هذا الاستيراد.
   const forcedWatchSuffix = watchExample ? deriveWatchSuffixFromExample(watchExample) : undefined;
+  // لو محطوط، يتجاوز اكتشاف "الصفحة التالية" التلقائي من HTML الموقع كلياً
+  // ويولّد روابط الصفحات مباشرة من النمط المستخرَج (راجع derivePageUrlPattern).
+  const pagePattern = pageExample ? derivePageUrlPattern(url, pageExample) : null;
+  if (pageExample && !pagePattern) { updateProgress('تعذّر فهم نمط رابط الصفحة الثانية — تأكد إنه نفس رابط صفحة القائمة بالضبط + جزء إضافي فيه رقم الصفحة.'); return; }
   // إعادة تحميل أقسام كل نوع من Firestore بداية كل مهمة استيراد — تجنّباً
   // لذاكرة مطابقة قديمة لو تغيّر شيء يدوياً بلوحة التحكم منذ آخر استيراد
   // بنفس الجلسة (راجع loadExistingCategories/findExistingCategory).
@@ -903,6 +953,7 @@ async function runImport() {
     localStorage.setItem(LAST_TYPE_KEY, contentType);
     localStorage.setItem(LAST_PARENT_KEY, parentCategoryId);
     localStorage.setItem(LAST_WATCH_EXAMPLE_KEY, watchExample);
+    localStorage.setItem(LAST_PAGE_EXAMPLE_KEY, pageExample);
   } catch (_) {}
   currentStateKey = stateKeyFor(url);
   currentState = loadState(currentStateKey);
@@ -922,7 +973,7 @@ async function runImport() {
       currentState.knownIds = Array.from(knownIds);
       currentState.watchSuffixCache = preservedWatchSuffixCache || {};
       currentState.startedAt = new Date().toISOString();
-      currentState.pages = await discoverCatalog(url);
+      currentState.pages = await discoverCatalog(url, pagePattern);
       saveState();
     }
     while (currentState.seriesIndex < currentState.pages.length) {
