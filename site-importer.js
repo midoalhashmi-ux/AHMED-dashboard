@@ -315,6 +315,13 @@ function normalizeTitleForMatch(title) {
 // كثير بعناوين مترجمة عربياً بلا أي كلمة إنجليزية دالة). لذلك هذا الاتجاه
 // يُستخدم فقط للترقية لأنمي (حتى لو اختار المستخدم مسلسلات)، لا للتخفيض
 // منه — تخمين "ليس أنمي" من غياب كلمة غير موثوق بما يكفي ليُبنى عليه قرار.
+//
+// لهذا السبب بالضبط: لو المستخدم اختار "أنمي" صراحةً بنموذج الاستيراد،
+// فحص "بلا حلقات = فيلم" أدناه لا يُطبَّق إطلاقاً — عمل أنمي بحلقة واحدة
+// فقط (فيلم/OVA أنمي، أو حلقة أولى من عمل لسه يُعرض أسبوعياً) هو أنمي
+// بالتعريف، لا فيلم عام. تطبيق الفحص عليه كان يُسرّب أعمال أنمي حقيقية
+// لقسم "أفلام" بلا أي مبرر (راجع الشرح أعلاه — لا يوجد دليل إطلاقاً على
+// عكس اختيار المستخدم الصريح هنا).
 const ANIME_HINT_WORDS = ['anime', 'أنمي', 'انمي', 'animeworld', 'crunchyroll', 'manga', 'مانجا'];
 function looksLikeAnime(item) {
   const text = `${item.url} ${item.title || ''}`.toLowerCase();
@@ -322,6 +329,7 @@ function looksLikeAnime(item) {
 }
 function guessContentType(item, collected, selectedType) {
   if (selectedType === 'channels') return selectedType; // بث مباشر، بنية مختلفة تماماً — لا نلمسها
+  if (selectedType === 'anime') return 'anime';
   const hasEpisodicStructure = collected.seasons.length > 0 || collected.episodes.length > 1;
   if (!hasEpisodicStructure) return 'movies';
   if (looksLikeAnime(item)) return 'anime';
